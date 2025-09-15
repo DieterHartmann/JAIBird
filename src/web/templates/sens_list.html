@@ -1,0 +1,232 @@
+{% extends "base.html" %}
+
+{% block title %}SENS Announcements - JAIBird{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="bi bi-file-earmark-text"></i> SENS Announcements
+                <small class="text-muted">{{ total }} total</small>
+            </h1>
+            <button class="btn btn-primary" onclick="triggerScrape()">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <form method="GET" class="row g-3">
+                    <div class="col-md-4">
+                        <label for="days" class="form-label">Time Period</label>
+                        <select name="days" id="days" class="form-select" onchange="this.form.submit()">
+                            <option value="1" {{ 'selected' if days == 1 else '' }}>Today</option>
+                            <option value="7" {{ 'selected' if days == 7 else '' }}>Last 7 days</option>
+                            <option value="30" {{ 'selected' if days == 30 else '' }}>Last 30 days</option>
+                            <option value="90" {{ 'selected' if days == 90 else '' }}>Last 90 days</option>
+                        </select>
+                    </div>
+                    <div class="col-md-8">
+                        <label class="form-label">&nbsp;</label>
+                        <div class="d-flex gap-2">
+                            <input type="text" class="form-control" placeholder="Search company or SENS number..." id="searchInput">
+                            <button type="button" class="btn btn-outline-secondary" onclick="clearSearch()">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if sens_announcements %}
+<!-- SENS List -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover" id="sensTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th>SENS #</th>
+                                <th>Company</th>
+                                <th>Title</th>
+                                <th>Published</th>
+                                <th>Status</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for sens in sens_announcements %}
+                            <tr class="{{ 'sens-urgent' if sens.is_urgent else '' }}">
+                                <td>
+                                    <code>{{ sens.sens_number }}</code>
+                                </td>
+                                <td>
+                                    <strong>{{ sens.company_name }}</strong>
+                                    {% if sens.is_urgent %}
+                                        <i class="bi bi-exclamation-triangle text-danger ms-1" 
+                                           title="{{ sens.urgent_reason }}"></i>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="text-truncate" style="max-width: 300px;" title="{{ sens.title }}">
+                                        {{ sens.title }}
+                                    </div>
+                                    {% if sens.urgent_reason %}
+                                        <small class="text-danger">
+                                            <i class="bi bi-exclamation-circle"></i> {{ sens.urgent_reason }}
+                                        </small>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div>
+                                        {{ sens.date_published.strftime('%Y-%m-%d') if sens.date_published else 'Unknown' }}
+                                    </div>
+                                    <small class="text-muted">
+                                        {{ sens.date_published.strftime('%H:%M') if sens.date_published else '' }}
+                                    </small>
+                                </td>
+                                <td>
+                                    {% if sens.is_urgent %}
+                                        <span class="badge bg-danger">
+                                            <i class="bi bi-exclamation-triangle"></i> Urgent
+                                        </span>
+                                    {% else %}
+                                        <span class="badge bg-secondary">Normal</span>
+                                    {% endif %}
+                                    
+                                    {% if sens.processed %}
+                                        <span class="badge bg-success">Processed</span>
+                                    {% else %}
+                                        <span class="badge bg-warning">Pending</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        {% if sens.pdf_url %}
+                                            <a href="{{ sens.pdf_url }}" target="_blank" class="btn btn-outline-primary" title="View PDF">
+                                                <i class="bi bi-file-pdf"></i>
+                                            </a>
+                                        {% endif %}
+                                        {% if sens.dropbox_pdf_path %}
+                                            <button type="button" class="btn btn-outline-info" title="In Dropbox">
+                                                <i class="bi bi-cloud-check"></i>
+                                            </button>
+                                        {% endif %}
+                                        <button type="button" class="btn btn-outline-secondary" 
+                                                onclick="copyToClipboard('{{ sens.sens_number }}')" title="Copy SENS number">
+                                            <i class="bi bi-clipboard"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Pagination -->
+<div class="row mt-4">
+    <div class="col-12">
+        <nav aria-label="SENS pagination">
+            <ul class="pagination justify-content-center">
+                {% if has_prev %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page - 1 }}&days={{ days }}">
+                            <i class="bi bi-chevron-left"></i> Previous
+                        </a>
+                    </li>
+                {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">
+                            <i class="bi bi-chevron-left"></i> Previous
+                        </span>
+                    </li>
+                {% endif %}
+                
+                <li class="page-item active">
+                    <span class="page-link">Page {{ page }}</span>
+                </li>
+                
+                {% if has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page + 1 }}&days={{ days }}">
+                            Next <i class="bi bi-chevron-right"></i>
+                        </a>
+                    </li>
+                {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link">
+                            Next <i class="bi bi-chevron-right"></i>
+                        </span>
+                    </li>
+                {% endif %}
+            </ul>
+        </nav>
+    </div>
+</div>
+
+{% else %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body text-center py-5">
+                <i class="bi bi-file-earmark-text display-1 text-muted"></i>
+                <h3 class="mt-3">No SENS Announcements Found</h3>
+                <p class="text-muted">No SENS announcements found for the selected time period.</p>
+                <button class="btn btn-primary" onclick="triggerScrape()">
+                    <i class="bi bi-arrow-clockwise"></i> Scrape SENS Now
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Search functionality
+document.getElementById('searchInput').addEventListener('input', debounce(function(e) {
+    const searchTerm = e.target.value.toLowerCase();
+    const table = document.getElementById('sensTable');
+    const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+    
+    for (let row of rows) {
+        const company = row.cells[1].textContent.toLowerCase();
+        const sensNumber = row.cells[0].textContent.toLowerCase();
+        const title = row.cells[2].textContent.toLowerCase();
+        
+        if (company.includes(searchTerm) || sensNumber.includes(searchTerm) || title.includes(searchTerm)) {
+            row.style.display = '';
+        } else {
+            row.style.display = 'none';
+        }
+    }
+}, 300));
+
+function clearSearch() {
+    document.getElementById('searchInput').value = '';
+    const table = document.getElementById('sensTable');
+    const rows = table.getElementsByTagName('tbody')[0].getElementsByTagName('tr');
+    
+    for (let row of rows) {
+        row.style.display = '';
+    }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Add Company - JAIBird{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h3 class="mb-0">
+                    <i class="bi bi-plus-circle"></i> Add Company to Watchlist
+                </h3>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">Add a company to your watchlist to receive immediate notifications when they publish SENS announcements.</p>
+                
+                <form method="POST">
+                    {{ form.hidden_tag() }}
+                    
+                    <div class="mb-3">
+                        {{ form.name.label(class="form-label") }}
+                        {{ form.name(class="form-control" + (" is-invalid" if form.name.errors else "")) }}
+                        {% if form.name.errors %}
+                            <div class="invalid-feedback">
+                                {% for error in form.name.errors %}
+                                    {{ error }}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        <div class="form-text">Enter the full company name as it appears on the JSE.</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                        {{ form.jse_code.label(class="form-label") }}
+                        <div class="input-group">
+                            <span class="input-group-text">JSE:</span>
+                            {{ form.jse_code(class="form-control" + (" is-invalid" if form.jse_code.errors else ""), placeholder="e.g., NPN, SHP, AGL") }}
+                        </div>
+                        {% if form.jse_code.errors %}
+                            <div class="invalid-feedback">
+                                {% for error in form.jse_code.errors %}
+                                    {{ error }}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        <div class="form-text">The company's JSE trading code (ticker symbol).</div>
+                    </div>
+                    
+                    <div class="mb-4">
+                        {{ form.notes.label(class="form-label") }}
+                        {{ form.notes(class="form-control" + (" is-invalid" if form.notes.errors else ""), rows="3", placeholder="Optional notes about this company...") }}
+                        {% if form.notes.errors %}
+                            <div class="invalid-feedback">
+                                {% for error in form.notes.errors %}
+                                    {{ error }}
+                                {% endfor %}
+                            </div>
+                        {% endif %}
+                        <div class="form-text">Optional notes or reminders about this company.</div>
+                    </div>
+                    
+                    <div class="d-flex justify-content-between">
+                        <a href="{{ url_for('watchlist') }}" class="btn btn-secondary">
+                            <i class="bi bi-arrow-left"></i> Back to Watchlist
+                        </a>
+                        {{ form.submit(class="btn btn-success") }}
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- Help Card -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-info-circle"></i> How it Works
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4 text-center mb-3">
+                        <i class="bi bi-bell-fill text-primary" style="font-size: 2rem;"></i>
+                        <h6 class="mt-2">Instant Alerts</h6>
+                        <small class="text-muted">Get Telegram notifications immediately when your watchlist companies publish SENS announcements.</small>
+                    </div>
+                    <div class="col-md-4 text-center mb-3">
+                        <i class="bi bi-envelope-fill text-success" style="font-size: 2rem;"></i>
+                        <h6 class="mt-2">Email Alerts</h6>
+                        <small class="text-muted">Receive dedicated email alerts for your watchlist companies in addition to the daily digest.</small>
+                    </div>
+                    <div class="col-md-4 text-center mb-3">
+                        <i class="bi bi-graph-up text-warning" style="font-size: 2rem;"></i>
+                        <h6 class="mt-2">Smart Monitoring</h6>
+                        <small class="text-muted">JAIBird automatically detects urgent announcements like profit warnings and trading halts.</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

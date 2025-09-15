@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}Watchlist - JAIBird{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center mb-4">
+            <h1>
+                <i class="bi bi-star"></i> Watchlist
+                <small class="text-muted">{{ companies|length }} companies</small>
+            </h1>
+            <a href="{{ url_for('add_company') }}" class="btn btn-success">
+                <i class="bi bi-plus"></i> Add Company
+            </a>
+        </div>
+    </div>
+</div>
+
+{% if companies %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Company Name</th>
+                                <th>JSE Code</th>
+                                <th>Added Date</th>
+                                <th>Notes</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for company in companies %}
+                            <tr>
+                                <td>
+                                    <strong>{{ company.name }}</strong>
+                                    {% if company.active_status %}
+                                        <span class="badge bg-success ms-2">Active</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary ms-2">Inactive</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <code>{{ company.jse_code }}</code>
+                                </td>
+                                <td>
+                                    <small class="text-muted">
+                                        {{ company.added_date.strftime('%Y-%m-%d') if company.added_date else 'Unknown' }}
+                                    </small>
+                                </td>
+                                <td>
+                                    {% if company.notes %}
+                                        <span class="text-truncate" style="max-width: 200px; display: inline-block;" 
+                                              title="{{ company.notes }}">
+                                            {{ company.notes }}
+                                        </span>
+                                    {% else %}
+                                        <span class="text-muted">No notes</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn btn-outline-info" 
+                                                title="View SENS for this company">
+                                            <i class="bi bi-file-earmark-text"></i>
+                                        </button>
+                                        <button type="button" class="btn btn-outline-danger" 
+                                                onclick="confirmRemove('{{ company.jse_code }}', '{{ company.name }}')"
+                                                title="Remove from watchlist">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body text-center py-5">
+                <i class="bi bi-star display-1 text-muted"></i>
+                <h3 class="mt-3">No Companies on Watchlist</h3>
+                <p class="text-muted">Add companies to your watchlist to receive notifications when they publish SENS announcements.</p>
+                <a href="{{ url_for('add_company') }}" class="btn btn-success btn-lg">
+                    <i class="bi bi-plus"></i> Add Your First Company
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- Remove Confirmation Modal -->
+<div class="modal fade" id="removeModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-exclamation-triangle text-warning"></i>
+                    Confirm Removal
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to remove <strong id="companyName"></strong> from your watchlist?</p>
+                <p class="text-muted">You will no longer receive notifications for this company's SENS announcements.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <a href="#" id="confirmRemoveBtn" class="btn btn-danger">
+                    <i class="bi bi-trash"></i> Remove Company
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function confirmRemove(jseCode, companyName) {
+    document.getElementById('companyName').textContent = companyName;
+    document.getElementById('confirmRemoveBtn').href = '{{ url_for("remove_company", jse_code="") }}' + jseCode;
+    new bootstrap.Modal(document.getElementById('removeModal')).show();
+}
+</script>
+{% endblock %}

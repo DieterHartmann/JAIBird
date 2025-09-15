@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - JAIBird{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h1 class="mb-4">
+            <i class="bi bi-gear"></i> Settings
+            <small class="text-muted">System Configuration</small>
+        </h1>
+    </div>
+</div>
+
+<div class="row">
+    <!-- Configuration Overview -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-sliders"></i> Configuration
+                </h5>
+            </div>
+            <div class="card-body">
+                <dl class="row">
+                    <dt class="col-sm-6">Environment:</dt>
+                    <dd class="col-sm-6">
+                        <span class="badge bg-{{ 'warning' if config.environment == 'development' else 'success' }}">
+                            {{ config.environment.title() }}
+                        </span>
+                    </dd>
+                    
+                    <dt class="col-sm-6">Scrape Interval:</dt>
+                    <dd class="col-sm-6">{{ config.scrape_interval_minutes }} minutes</dd>
+                    
+                    <dt class="col-sm-6">Daily Digest Time:</dt>
+                    <dd class="col-sm-6">{{ config.daily_digest_time }}</dd>
+                    
+                    <dt class="col-sm-6">Test Mode:</dt>
+                    <dd class="col-sm-6">
+                        <span class="badge bg-{{ 'warning' if config.test_mode else 'success' }}">
+                            {{ 'Enabled' if config.test_mode else 'Disabled' }}
+                        </span>
+                    </dd>
+                    
+                    <dt class="col-sm-6">Cache Retention:</dt>
+                    <dd class="col-sm-6">{{ config.local_cache_retention_days }} days</dd>
+                </dl>
+            </div>
+        </div>
+        
+        <!-- Notification Settings -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-bell"></i> Notifications
+                </h5>
+            </div>
+            <div class="card-body">
+                <dl class="row">
+                    <dt class="col-sm-6">Telegram:</dt>
+                    <dd class="col-sm-6">
+                        <span class="badge bg-{{ 'success' if config.telegram_notifications_enabled else 'secondary' }}">
+                            {{ 'Enabled' if config.telegram_notifications_enabled else 'Disabled' }}
+                        </span>
+                    </dd>
+                    
+                    <dt class="col-sm-6">Email:</dt>
+                    <dd class="col-sm-6">
+                        <span class="badge bg-{{ 'success' if config.email_notifications_enabled else 'secondary' }}">
+                            {{ 'Enabled' if config.email_notifications_enabled else 'Disabled' }}
+                        </span>
+                    </dd>
+                    
+                    <dt class="col-sm-6">SMTP Server:</dt>
+                    <dd class="col-sm-6">{{ config.smtp_server }}:{{ config.smtp_port }}</dd>
+                    
+                    <dt class="col-sm-6">Email From:</dt>
+                    <dd class="col-sm-6">{{ config.email_username }}</dd>
+                    
+                    <dt class="col-sm-6">Email To:</dt>
+                    <dd class="col-sm-6">{{ config.notification_email }}</dd>
+                </dl>
+                
+                <div class="mt-3">
+                    <button class="btn btn-outline-primary" onclick="testNotifications()">
+                        <i class="bi bi-bell"></i> Test Notifications
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Storage & System Info -->
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-cloud"></i> Storage
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if storage_info and 'error' not in storage_info %}
+                <dl class="row">
+                    <dt class="col-sm-6">Used Space:</dt>
+                    <dd class="col-sm-6">{{ storage_info.get('used_gb', 0) | round(2) }} GB</dd>
+                    
+                    <dt class="col-sm-6">Total Space:</dt>
+                    <dd class="col-sm-6">{{ storage_info.get('allocated_gb', 0) | round(2) }} GB</dd>
+                    
+                    <dt class="col-sm-6">Usage:</dt>
+                    <dd class="col-sm-6">
+                        {% set usage_percent = (storage_info.get('used', 0) / storage_info.get('allocated', 1)) * 100 if storage_info.get('allocated', 0) > 0 else 0 %}
+                        <div class="progress" style="height: 20px;">
+                            <div class="progress-bar" role="progressbar" 
+                                 style="width: {{ usage_percent }}%"
+                                 aria-valuenow="{{ usage_percent }}" aria-valuemin="0" aria-valuemax="100">
+                                {{ usage_percent | round(1) }}%
+                            </div>
+                        </div>
+                    </dd>
+                    
+                    <dt class="col-sm-6">Dropbox Folder:</dt>
+                    <dd class="col-sm-6"><code>{{ config.dropbox_folder }}</code></dd>
+                </dl>
+                {% else %}
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    Unable to connect to Dropbox: {{ storage_info.get('error', 'Unknown error') }}
+                </div>
+                {% endif %}
+                
+                <hr>
+                
+                <dl class="row">
+                    <dt class="col-sm-6">Local Storage:</dt>
+                    <dd class="col-sm-6"><code>{{ config.local_storage_path }}</code></dd>
+                    
+                    <dt class="col-sm-6">Database:</dt>
+                    <dd class="col-sm-6"><code>{{ config.database_path }}</code></dd>
+                    
+                    <dt class="col-sm-6">Log File:</dt>
+                    <dd class="col-sm-6"><code>{{ config.log_file_path }}</code></dd>
+                </dl>
+            </div>
+        </div>
+        
+        <!-- Urgent Keywords -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-exclamation-triangle"></i> Urgent Keywords
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">SENS announcements containing these keywords will trigger immediate Telegram alerts:</p>
+                <div class="d-flex flex-wrap gap-1">
+                    {% for keyword in config.get_urgent_keywords_list() %}
+                        <span class="badge bg-warning text-dark">{{ keyword }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+        
+        <!-- System Actions -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-tools"></i> System Actions
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <button class="btn btn-primary" onclick="triggerScrape()">
+                        <i class="bi bi-arrow-clockwise"></i> Scrape SENS Now
+                    </button>
+                    <button class="btn btn-info" onclick="testNotifications()">
+                        <i class="bi bi-bell"></i> Test Notifications
+                    </button>
+                    <button class="btn btn-warning" onclick="sendDigest()">
+                        <i class="bi bi-envelope"></i> Send Daily Digest
+                    </button>
+                    <button class="btn btn-outline-secondary" onclick="refreshStats()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh Statistics
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Configuration Help -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-question-circle"></i> Configuration Help
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6">
+                        <h6>Environment Variables</h6>
+                        <p class="small text-muted">
+                            Configuration is loaded from the <code>.env</code> file in the project root. 
+                            Use <code>env_template.txt</code> as a reference for all available settings.
+                        </p>
+                        
+                        <h6>Notification Setup</h6>
+                        <ul class="small text-muted">
+                            <li>Create a Telegram bot via @BotFather</li>
+                            <li>Get your chat ID by messaging the bot</li>
+                            <li>Use Gmail App Passwords for email authentication</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6>Dropbox Setup</h6>
+                        <ul class="small text-muted">
+                            <li>Create a Dropbox app at developers.dropbox.com</li>
+                            <li>Generate an access token with file read/write permissions</li>
+                            <li>Set the DROPBOX_ACCESS_TOKEN in your .env file</li>
+                        </ul>
+                        
+                        <h6>Scheduling</h6>
+                        <p class="small text-muted">
+                            Run <code>python main.py scheduler</code> to start automated SENS scraping 
+                            and daily digest delivery.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function refreshStats() {
+    showLoading('Refreshing statistics...');
+    
+    // Refresh the page after a short delay
+    setTimeout(() => {
+        window.location.reload();
+    }, 1000);
+}
+</script>
+{% endblock %}

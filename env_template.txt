@@ -1,0 +1,114 @@
+# JAIBird Configuration Template
+# Copy this file to .env and fill in your actual values
+# NEVER commit .env to version control - it contains sensitive information
+
+# ============================================================================
+# API KEYS - Replace with your actual keys
+# ============================================================================
+
+# Dropbox API Configuration
+# Get your access token from: https://www.dropbox.com/developers/apps
+DROPBOX_ACCESS_TOKEN=your_dropbox_access_token_here
+
+# Telegram Bot Configuration
+# Create a bot via @BotFather on Telegram
+TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+# Get your chat ID by messaging your bot and visiting: https://api.telegram.org/bot<YourBOTToken>/getUpdates
+TELEGRAM_CHAT_ID=your_telegram_chat_id_here
+
+# AI API Keys
+# Get from: https://console.anthropic.com/
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+# Get from: https://platform.openai.com/api-keys
+OPENAI_API_KEY=your_openai_api_key_here
+
+# ============================================================================
+# EMAIL CONFIGURATION
+# ============================================================================
+
+# SMTP Server Settings (example shows Gmail configuration)
+SMTP_SERVER=smtp.gmail.com
+SMTP_PORT=587
+EMAIL_USERNAME=your_email@gmail.com
+# For Gmail, use an App Password, not your regular password
+EMAIL_PASSWORD=your_app_password_here
+# Email address to send notifications to
+NOTIFICATION_EMAIL=your_notification_email@example.com
+
+# ============================================================================
+# SCRAPING CONFIGURATION
+# ============================================================================
+
+# How often to check for new SENS announcements (in minutes)
+SCRAPE_INTERVAL_MINUTES=5
+
+# How many days to keep files in local cache before deletion
+LOCAL_CACHE_RETENTION_DAYS=30
+
+# Time to send daily digest email (24-hour format: HH:MM)
+DAILY_DIGEST_TIME=08:30
+
+# ============================================================================
+# STORAGE CONFIGURATION
+# ============================================================================
+
+# Local storage path for SENS PDFs (relative to project root)
+LOCAL_STORAGE_PATH=./data/sens_pdfs/
+
+# Dropbox folder path (must start with /)
+DROPBOX_FOLDER=/JAIBird/SENS/
+
+# ============================================================================
+# DATABASE CONFIGURATION
+# ============================================================================
+
+# SQLite database path (relative to project root)
+DATABASE_PATH=./data/jaibird.db
+
+# ============================================================================
+# WEB INTERFACE CONFIGURATION
+# ============================================================================
+
+# Flask application settings
+FLASK_HOST=127.0.0.1
+FLASK_PORT=5000
+FLASK_DEBUG=true
+FLASK_SECRET_KEY=your_secret_key_for_flask_sessions
+
+# ============================================================================
+# LOGGING CONFIGURATION
+# ============================================================================
+
+# Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL
+LOG_LEVEL=INFO
+LOG_FILE_PATH=./logs/jaibird.log
+
+# ============================================================================
+# SELENIUM CONFIGURATION
+# ============================================================================
+
+# WebDriver settings
+WEBDRIVER_HEADLESS=true
+WEBDRIVER_TIMEOUT=30
+WEBDRIVER_DOWNLOAD_PATH=./data/sens_pdfs/temp/
+
+# ============================================================================
+# NOTIFICATION PREFERENCES
+# ============================================================================
+
+# Keywords that trigger immediate Telegram notifications (comma-separated)
+URGENT_KEYWORDS=profit warning,delisting,suspension,trading halt,cautionary,acquisition,merger,rights issue
+
+# Enable/disable notification types
+TELEGRAM_NOTIFICATIONS_ENABLED=true
+EMAIL_NOTIFICATIONS_ENABLED=true
+
+# ============================================================================
+# DEVELOPMENT SETTINGS
+# ============================================================================
+
+# Set to 'development' or 'production'
+ENVIRONMENT=development
+
+# Enable test mode (prevents actual notifications from being sent)
+TEST_MODE=false

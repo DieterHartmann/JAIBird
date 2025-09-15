@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Error {{ error_code }} - JAIBird{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body text-center py-5">
+                <div class="display-1 text-muted mb-3">
+                    {% if error_code == 404 %}
+                        <i class="bi bi-file-earmark-x"></i>
+                    {% elif error_code == 500 %}
+                        <i class="bi bi-exclamation-triangle"></i>
+                    {% else %}
+                        <i class="bi bi-question-circle"></i>
+                    {% endif %}
+                </div>
+                
+                <h1 class="display-4">Error {{ error_code }}</h1>
+                
+                <p class="lead text-muted">
+                    {% if error_code == 404 %}
+                        The page you're looking for doesn't exist.
+                    {% elif error_code == 500 %}
+                        Something went wrong on our end.
+                    {% else %}
+                        An unexpected error occurred.
+                    {% endif %}
+                </p>
+                
+                {% if error_message %}
+                    <div class="alert alert-danger mt-3">
+                        {{ error_message }}
+                    </div>
+                {% endif %}
+                
+                <div class="mt-4">
+                    <a href="{{ url_for('index') }}" class="btn btn-primary me-2">
+                        <i class="bi bi-house"></i> Go Home
+                    </a>
+                    <button onclick="history.back()" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-left"></i> Go Back
+                    </button>
+                </div>
+                
+                {% if error_code == 500 %}
+                    <div class="mt-4">
+                        <small class="text-muted">
+                            If this problem persists, please check the application logs or contact support.
+                        </small>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
