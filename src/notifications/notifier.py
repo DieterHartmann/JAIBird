@@ -119,6 +119,23 @@ class EmailNotifier:
     def __init__(self):
         self.config = get_config()
     
+    def _send_email(self, msg):
+        """Helper method to send email with proper SSL/TLS handling."""
+        smtp_server, smtp_port = self.config.get_smtp_settings()
+        
+        if self.config.email_use_ssl:
+            # Use SSL connection (typically port 465)
+            with smtplib.SMTP_SSL(smtp_server, smtp_port) as server:
+                server.login(self.config.email_username, self.config.email_password)
+                server.send_message(msg)
+        else:
+            # Use regular SMTP with optional STARTTLS
+            with smtplib.SMTP(smtp_server, smtp_port) as server:
+                if self.config.email_use_tls:
+                    server.starttls()
+                server.login(self.config.email_username, self.config.email_password)
+                server.send_message(msg)
+    
     def send_daily_digest(self, announcements: List[SensAnnouncement]) -> bool:
         """Send daily digest email with all SENS announcements."""
         if not self.config.email_notifications_enabled:
@@ -141,11 +158,8 @@ class EmailNotifier:
             html_part = MIMEText(html_content, 'html')
             msg.attach(html_part)
             
-            # Send email
-            with smtplib.SMTP(self.config.smtp_server, self.config.smtp_port) as server:
-                server.starttls()
-                server.login(self.config.email_username, self.config.email_password)
-                server.send_message(msg)
+            # Send email using helper method
+            self._send_email(msg)
             
             logger.info(f"Sent daily digest email with {len(announcements)} announcements")
             return True
@@ -176,11 +190,8 @@ class EmailNotifier:
             html_part = MIMEText(html_content, 'html')
             msg.attach(html_part)
             
-            # Send email
-            with smtplib.SMTP(self.config.smtp_server, self.config.smtp_port) as server:
-                server.starttls()
-                server.login(self.config.email_username, self.config.email_password)
-                server.send_message(msg)
+            # Send email using helper method
+            self._send_email(msg)
             
             logger.info(f"Sent watchlist email alert for SENS {announcement.sens_number}")
             return True
@@ -321,10 +332,8 @@ class EmailNotifier:
             msg['From'] = self.config.email_username
             msg['To'] = self.config.notification_email
             
-            with smtplib.SMTP(self.config.smtp_server, self.config.smtp_port) as server:
-                server.starttls()
-                server.login(self.config.email_username, self.config.email_password)
-                server.send_message(msg)
+            # Send email using helper method
+            self._send_email(msg)
             
             logger.info("Test email sent successfully")
             return True

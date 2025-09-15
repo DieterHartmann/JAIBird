@@ -33,6 +33,16 @@ class JAIBirdConfig(BaseSettings):
     email_password: str = Field(..., env="EMAIL_PASSWORD")
     notification_email: str = Field(..., env="NOTIFICATION_EMAIL")
     
+    # Additional email server settings
+    email_smtp_server: Optional[str] = Field(None, env="EMAIL_SMTP_SERVER")
+    email_smtp_port: Optional[int] = Field(None, env="EMAIL_SMTP_PORT")
+    email_imap_server: Optional[str] = Field(None, env="EMAIL_IMAP_SERVER")
+    email_imap_port: Optional[int] = Field(None, env="EMAIL_IMAP_PORT")
+    email_pop3_server: Optional[str] = Field(None, env="EMAIL_POP3_SERVER")
+    email_pop3_port: Optional[int] = Field(None, env="EMAIL_POP3_PORT")
+    email_use_ssl: bool = Field(False, env="EMAIL_USE_SSL")
+    email_use_tls: bool = Field(True, env="EMAIL_USE_TLS")
+    
     # ============================================================================
     # SCRAPING CONFIGURATION
     # ============================================================================
@@ -126,6 +136,13 @@ class JAIBirdConfig(BaseSettings):
     def get_urgent_keywords_list(self) -> List[str]:
         """Return urgent keywords as a list."""
         return [keyword.strip().lower() for keyword in self.urgent_keywords.split(",")]
+    
+    def get_smtp_settings(self) -> tuple:
+        """Return SMTP settings, preferring EMAIL_SMTP_* over SMTP_* if available."""
+        # Use EMAIL_SMTP_* settings if available, otherwise fall back to SMTP_*
+        server = self.email_smtp_server or self.smtp_server
+        port = self.email_smtp_port or self.smtp_port
+        return server, port
     
     def ensure_directories_exist(self):
         """Create necessary directories if they don't exist."""
