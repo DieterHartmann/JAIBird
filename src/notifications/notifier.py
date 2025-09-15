@@ -5,6 +5,10 @@ Handles Telegram and email notifications for SENS announcements.
 
 import smtplib
 import logging
+import subprocess
+import json
+import tempfile
+import os
 from datetime import datetime, timedelta
 from typing import List, Optional
 from email.mime.text import MIMEText
@@ -13,8 +17,6 @@ from email.mime.base import MIMEBase
 from email import encoders
 
 import requests
-from telegram import Bot
-from telegram.error import TelegramError
 
 from ..database.models import DatabaseManager, SensAnnouncement, Notification
 from ..utils.config import get_config
@@ -29,34 +31,15 @@ class NotificationError(Exception):
 
 
 class TelegramNotifier:
-    """Handles Telegram notifications."""
+    """Handles Telegram notifications via subprocess to avoid async conflicts."""
     
     def __init__(self):
         self.config = get_config()
-        self.bot = None
-        self._initialize_bot()
-    
-    def _initialize_bot(self):
-        """Initialize Telegram bot."""
-        try:
-            if not self.config.telegram_notifications_enabled:
-                logger.info("Telegram notifications are disabled")
-                return
-            
-            self.bot = Bot(token=self.config.telegram_bot_token)
-            # Test the bot
-            bot_info = self.bot.get_me()
-            logger.info(f"Telegram bot initialized: @{bot_info.username}")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize Telegram bot: {e}")
-            if not self.config.test_mode:
-                raise NotificationError(f"Telegram initialization failed: {e}")
     
     def send_urgent_notification(self, announcement: SensAnnouncement) -> bool:
-        """Send urgent SENS notification via Telegram."""
-        if not self.config.telegram_notifications_enabled or not self.bot:
-            logger.warning("Telegram notifications disabled or bot not initialized")
+        """Send urgent SENS notification via Telegram using subprocess."""
+        if not self.config.telegram_notifications_enabled:
+            logger.warning("Telegram notifications are disabled")
             return False
         
         if self.config.test_mode:
@@ -64,63 +47,69 @@ class TelegramNotifier:
             return True
         
         try:
-            # Format the message
-            message = self._format_urgent_message(announcement)
+            # Create message data
+            message_data = {
+                'type': 'urgent',
+                'sens_number': announcement.sens_number,
+                'company_name': announcement.company_name,
+                'title': announcement.title,
+                'urgent_reason': announcement.urgent_reason,
+                'date_published': announcement.date_published.isoformat() if announcement.date_published else None,
+                'pdf_url': announcement.pdf_url
+            }
             
-            # Send the message
-            self.bot.send_message(
-                chat_id=self.config.telegram_chat_id,
-                text=message,
-                parse_mode='Markdown',
-                disable_web_page_preview=False
-            )
+            return self._send_telegram_message(message_data)
             
-            logger.info(f"Sent urgent Telegram notification for SENS {announcement.sens_number}")
-            return True
-            
-        except TelegramError as e:
-            logger.error(f"Telegram error sending notification for SENS {announcement.sens_number}: {e}")
-            return False
         except Exception as e:
-            logger.error(f"Unexpected error sending Telegram notification: {e}")
+            logger.error(f"Error sending Telegram notification: {e}")
             return False
-    
-    def _format_urgent_message(self, announcement: SensAnnouncement) -> str:
-        """Format urgent announcement message for Telegram."""
-        urgency_emoji = "🚨" if announcement.is_urgent else "📢"
-        
-        message = f"{urgency_emoji} *URGENT SENS ANNOUNCEMENT*\n\n"
-        message += f"*Company:* {announcement.company_name}\n"
-        message += f"*SENS Number:* {announcement.sens_number}\n"
-        message += f"*Title:* {announcement.title}\n\n"
-        
-        if announcement.urgent_reason:
-            message += f"*Urgent Reason:* {announcement.urgent_reason}\n\n"
-        
-        message += f"*Published:* {announcement.date_published.strftime('%Y-%m-%d %H:%M') if announcement.date_published else 'Unknown'}\n"
-        
-        if announcement.pdf_url:
-            message += f"*PDF Link:* {announcement.pdf_url}\n"
-        
-        message += f"\n_JAIBird Alert System_"
-        
-        return message
     
     def send_test_message(self) -> bool:
         """Send a test message to verify Telegram setup."""
-        if not self.bot:
+        if not self.config.telegram_notifications_enabled:
             return False
         
         try:
-            test_message = "🤖 JAIBird Test Message\n\nTelegram notifications are working correctly!"
-            self.bot.send_message(
-                chat_id=self.config.telegram_chat_id,
-                text=test_message
-            )
-            logger.info("Test Telegram message sent successfully")
-            return True
+            message_data = {
+                'type': 'test',
+                'message': '🤖 JAIBird Test Message\n\nTelegram notifications are working correctly!'
+            }
+            
+            return self._send_telegram_message(message_data)
+            
         except Exception as e:
             logger.error(f"Failed to send test Telegram message: {e}")
+            return False
+    
+    def _send_telegram_message(self, message_data: dict) -> bool:
+        """Send message via subprocess to avoid async conflicts."""
+        try:
+            # Create temporary file with message data
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
+                json.dump(message_data, f)
+                temp_file = f.name
+            
+            # Call the telegram sender subprocess
+            script_path = os.path.join(os.path.dirname(__file__), 'telegram_sender.py')
+            result = subprocess.run([
+                'python', script_path, temp_file
+            ], capture_output=True, text=True, timeout=30)
+            
+            # Clean up temp file
+            os.unlink(temp_file)
+            
+            if result.returncode == 0:
+                logger.info("Telegram message sent successfully via subprocess")
+                return True
+            else:
+                logger.error(f"Telegram subprocess failed: {result.stderr}")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            logger.error("Telegram subprocess timed out")
+            return False
+        except Exception as e:
+            logger.error(f"Error in telegram subprocess: {e}")
             return False
 
 

@@ -25,6 +25,7 @@ The foundation of the platform focuses on automated SENS (Stock Exchange News Se
 - **Notifications**: Telegram Bot API, SMTP Email
 - **AI Integration**: Anthropic Claude, OpenAI APIs
 - **Deployment**: Raspberry Pi (production)
+- **Architecture**: Multi-process design to avoid async/sync conflicts
 
 ## SENS Scraping Specifications
 
@@ -96,6 +97,100 @@ DAILY_DIGEST_TIME=08:30
 LOCAL_STORAGE_PATH=./data/sens_pdfs/
 DROPBOX_FOLDER=/JAIBird/SENS/
 ```
+
+## Multi-Process Architecture
+
+### The Async/Sync Conflict Problem
+**Problem**: Mixing async (Telegram Bot API) and sync (Flask, email, scraping) operations in the same Python process causes event loop conflicts, leading to errors like:
+- `'coroutine' object has no attribute 'username'`
+- `RuntimeError: This event loop is already running`
+- `RuntimeWarning: coroutine was never awaited`
+
+### Solution: Process Separation
+JAIBird uses a **multi-process architecture** to completely isolate async and sync operations:
+
+#### 1. Main Processes:
+- **Scheduler Process**: Handles scraping, database operations, email notifications
+- **Web Interface Process**: Flask app for management interface
+- **Telegram Sender Process**: Isolated async Telegram operations
+
+#### 2. Implementation Details:
+
+**Telegram Isolation**:
+```python
+# Instead of direct async calls in main process:
+bot = Bot(token)
+await bot.send_message()  # ❌ Causes conflicts
+
+# Use subprocess isolation:
+subprocess.run(['python', 'telegram_sender.py', message_file])  # ✅ Clean separation
+```
+
+**Process Communication**:
+- JSON files for message passing between processes
+- Temporary files for data exchange
+- Exit codes for success/failure communication
+
+#### 3. Deployment Strategies:
+
+**Windows (Development/Production)**:
+```batch
+start_jaibird.bat  # Launches all processes
+stop_jaibird.bat   # Stops all processes
+```
+
+**Linux/Raspberry Pi (Production)**:
+```bash
+# Systemd services for each process
+sudo systemctl start jaibird-scheduler
+sudo systemctl start jaibird-web
+```
+
+#### 4. Benefits:
+- ✅ **No async conflicts**: Each process has its own event loop
+- ✅ **Fault isolation**: One process crash doesn't affect others
+- ✅ **Scalability**: Easy to distribute across multiple machines
+- ✅ **Maintainability**: Clear separation of concerns
+- ✅ **Debugging**: Isolated logs per process
+
+#### 5. File Structure:
+```
+src/notifications/
+├── notifier.py           # Main notification coordinator
+├── telegram_sender.py    # Isolated async Telegram process
+└── email_sender.py       # Sync email operations
+```
+
+### Best Practices for Future Development:
+
+1. **Keep Async Isolated**: Any new async operations (Discord, Slack, etc.) should use subprocess pattern
+2. **Process Communication**: Use JSON files or queues for inter-process communication
+3. **Error Handling**: Each process should handle its own errors and report via exit codes
+4. **Logging**: Separate log files per process for debugging
+5. **Testing**: Test each process independently
+
+### Common Patterns to Avoid:
+```python
+# ❌ DON'T: Mix async and sync in same process
+class BadNotifier:
+    def __init__(self):
+        self.bot = Bot(token)  # Async
+        self.email = SMTPClient()  # Sync
+    
+    def send_all(self):
+        asyncio.run(self.bot.send())  # ❌ Event loop conflicts
+        self.email.send()
+
+# ✅ DO: Separate processes
+class GoodNotifier:
+    def send_telegram(self, data):
+        subprocess.run(['python', 'telegram_sender.py', data])
+    
+    def send_email(self, data):
+        self.email.send(data)  # Pure sync
+```
+
+This architecture pattern should be used for **any future project** that needs to mix async and sync operations.
 
 ## Future Development Roadmap
 

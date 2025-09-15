@@ -7,7 +7,7 @@ beautifulsoup4==4.12.2
 requests==2.31.0
 
 # Database
-sqlite3  # Built into Python
+# sqlite3 is built into Python, no need to install
 sqlalchemy==2.0.23
 
 # Cloud Storage
@@ -15,8 +15,7 @@ dropbox==11.36.2
 
 # Notifications
 python-telegram-bot==20.7
-smtplib  # Built into Python
-email-mime  # Built into Python
+# smtplib and email are built into Python
 
 # Web Framework
 flask==3.0.0
@@ -40,8 +39,7 @@ numpy==1.25.2
 schedule==1.2.0
 python-dateutil==2.8.2
 pytz==2023.3
-pathlib  # Built into Python
-logging  # Built into Python
+# pathlib and logging are built into Python
 
 # PDF Processing
 PyPDF2==3.0.1

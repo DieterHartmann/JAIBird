@@ -129,7 +129,7 @@ def main():
     parser = argparse.ArgumentParser(description="JAIBird Stock Trading Platform")
     parser.add_argument('command', choices=[
         'web', 'scrape', 'initial-scrape', 'digest', 'test-notifications',
-        'scheduler', 'setup', 'status'
+        'test-telegram', 'scheduler', 'setup', 'status'
     ], help='Command to execute')
     parser.add_argument('--config', help='Path to config file')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
@@ -177,6 +177,22 @@ def main():
                              "⚠️ Disabled" if status == 'disabled' else \
                              "❌ Failed"
                 print(f"  {system.capitalize()}: {status_text}")
+        
+        elif args.command == 'test-telegram':
+            logger.info("Testing Telegram connection separately...")
+            import subprocess
+            import os
+            
+            script_path = os.path.join('src', 'notifications', 'telegram_sender.py')
+            result = subprocess.run([
+                'python', script_path, 'dummy', 'test'
+            ], capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                print("✅ Telegram connection test passed!")
+            else:
+                print(f"❌ Telegram connection test failed: {result.stderr}")
+                sys.exit(1)
             
         elif args.command == 'scheduler':
             logger.info("Starting JAIBird scheduler...")

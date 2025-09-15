@@ -7,7 +7,8 @@ import os
 import logging
 from pathlib import Path
 from typing import List, Optional
-from pydantic import BaseSettings, Field, validator
+from pydantic import Field, field_validator
+from pydantic_settings import BaseSettings
 from dotenv import load_dotenv
 
 
@@ -87,12 +88,15 @@ class JAIBirdConfig(BaseSettings):
     environment: str = Field("development", env="ENVIRONMENT")
     test_mode: bool = Field(False, env="TEST_MODE")
     
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = False
+    model_config = {
+        "env_file": ".env",
+        "env_file_encoding": "utf-8",
+        "case_sensitive": False,
+        "extra": "ignore"  # Allow extra fields in .env file
+    }
     
-    @validator("daily_digest_time")
+    @field_validator("daily_digest_time")
+    @classmethod
     def validate_time_format(cls, v):
         """Validate that daily_digest_time is in HH:MM format."""
         import re
@@ -100,7 +104,8 @@ class JAIBirdConfig(BaseSettings):
             raise ValueError("daily_digest_time must be in HH:MM format (24-hour)")
         return v
     
-    @validator("dropbox_folder")
+    @field_validator("dropbox_folder")
+    @classmethod
     def validate_dropbox_folder(cls, v):
         """Ensure dropbox folder starts with /."""
         if not v.startswith("/"):
@@ -109,7 +114,8 @@ class JAIBirdConfig(BaseSettings):
             v = v + "/"
         return v
     
-    @validator("log_level")
+    @field_validator("log_level")
+    @classmethod
     def validate_log_level(cls, v):
         """Validate log level is valid."""
         valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
