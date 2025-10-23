@@ -79,8 +79,20 @@
                                     {% endif %}
                                 </td>
                                 <td>
-                                    <div class="text-truncate" style="max-width: 300px;" title="{{ sens.title }}">
+                                    <div class="text-truncate sens-title-hover" 
+                                         style="max-width: 300px; cursor: help;" 
+                                         {% if sens.ai_summary %}
+                                         data-bs-toggle="tooltip" 
+                                         data-bs-placement="top" 
+                                         data-bs-html="true"
+                                         data-bs-title="<strong>AI Summary:</strong><br>{{ sens.ai_summary }}"
+                                         {% else %}
+                                         title="{{ sens.title }}"
+                                         {% endif %}>
                                         {{ sens.title }}
+                                        {% if sens.ai_summary %}
+                                            <i class="bi bi-robot text-info ms-1" style="font-size: 0.8em;"></i>
+                                        {% endif %}
                                     </div>
                                     {% if sens.urgent_reason %}
                                         <small class="text-danger">

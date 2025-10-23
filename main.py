@@ -18,9 +18,14 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 from src.utils.config import get_config
 from src.database.models import DatabaseManager
 from src.scrapers.sens_scraper import SensScraper, run_initial_scrape, run_daily_scrape
+from src.ai.pdf_parser import parse_sens_announcement
+from src.notifications.telegram_bot import run_bot
 from src.notifications.notifier import NotificationManager
 from src.utils.dropbox_manager import DropboxManager
+from src.utils.excel_manager import ExcelManager
 from src.web.app import run_app
+from src.company.enricher import CompanyEnricher
+from src.company.company_db import CompanyDB
 
 
 logger = logging.getLogger(__name__)
@@ -60,6 +65,22 @@ class JAIBirdScheduler:
             
             # Process notifications for new announcements
             for announcement in announcements:
+                # Parse PDF and generate AI summary for ALL new announcements
+                try:
+                    parsed_announcement = parse_sens_announcement(announcement)
+                    if parsed_announcement.ai_summary:
+                        # Update the database with parsed content
+                        self.db_manager.update_sens_parsing(
+                            announcement.sens_number,
+                            parsed_announcement.pdf_content,
+                            parsed_announcement.ai_summary,
+                            parsed_announcement.parse_method,
+                            parsed_announcement.parse_status
+                        )
+                        logger.info(f"Generated AI summary for SENS {announcement.sens_number}")
+                except Exception as e:
+                    logger.error(f"PDF parsing failed for SENS {announcement.sens_number}: {e}")
+                
                 # Upload to Dropbox
                 if announcement.local_pdf_path:
                     dropbox_path = self.dropbox_manager.upload_pdf(
@@ -129,7 +150,7 @@ def main():
     parser = argparse.ArgumentParser(description="JAIBird Stock Trading Platform")
     parser.add_argument('command', choices=[
         'web', 'scrape', 'initial-scrape', 'digest', 'test-notifications',
-        'test-telegram', 'scheduler', 'setup', 'status'
+        'test-telegram', 'scheduler', 'setup', 'status', 'export-excel', 'parse-pdfs', 'telegram-bot'
     ], help='Command to execute')
     parser.add_argument('--config', help='Path to config file')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
@@ -150,7 +171,54 @@ def main():
             
         elif args.command == 'scrape':
             logger.info("Running daily SENS scrape...")
+            config = get_config()
+            db_manager = DatabaseManager(config.database_path)
+            notification_manager = NotificationManager(db_manager)
+            dropbox_manager = DropboxManager()
+            
+            # Run the scrape
             announcements = run_daily_scrape()
+            
+            # Process notifications and PDF parsing for new announcements
+            for announcement in announcements:
+                try:
+                    # Parse PDF and generate AI summary for ALL new announcements
+                    try:
+                        parsed_announcement = parse_sens_announcement(announcement)
+                        if parsed_announcement.ai_summary:
+                            # Update the database with parsed content
+                            announcement.pdf_content = parsed_announcement.pdf_content
+                            announcement.ai_summary = parsed_announcement.ai_summary
+                            announcement.parse_method = parsed_announcement.parse_method
+                            announcement.parse_status = parsed_announcement.parse_status
+                            announcement.parsed_at = parsed_announcement.parsed_at
+                            db_manager.update_sens_parsing(announcement)
+                            logger.info(f"Generated AI summary for SENS {announcement.sens_number}")
+                        else:
+                            logger.warning(f"No AI summary generated for SENS {announcement.sens_number}")
+                    except Exception as e:
+                        logger.error(f"PDF parsing failed for SENS {announcement.sens_number}: {e}")
+                    
+                    # Upload to Dropbox
+                    if announcement.local_pdf_path:
+                        dropbox_path = dropbox_manager.upload_pdf(
+                            announcement.local_pdf_path,
+                            announcement.sens_number,
+                            announcement.company_name
+                        )
+                        if dropbox_path:
+                            # Update database with Dropbox path
+                            announcement.dropbox_pdf_path = dropbox_path
+                    
+                    # Send notifications
+                    notification_manager.process_new_announcement(announcement)
+                    
+                    # Enrich company intelligence DB
+                    CompanyEnricher(CompanyDB()).enrich_from_announcement(announcement)
+
+                except Exception as e:
+                    logger.error(f"Failed to process announcement {announcement.sens_number}: {e}")
+            
             print(f"Scrape completed: {len(announcements)} new announcements")
             
         elif args.command == 'initial-scrape':
@@ -212,6 +280,18 @@ def main():
         elif args.command == 'status':
             logger.info("Checking JAIBird status...")
             show_status()
+            
+        elif args.command == 'export-excel':
+            logger.info("Exporting SENS data to Excel...")
+            export_to_excel()
+            
+        elif args.command == 'parse-pdfs':
+            logger.info("Processing unparsed PDFs...")
+            parse_unparsed_pdfs()
+            
+        elif args.command == 'telegram-bot':
+            logger.info("Starting interactive Telegram bot...")
+            run_telegram_bot()
             
     except Exception as e:
         logger.error(f"JAIBird failed: {e}")
@@ -315,6 +395,96 @@ def run_combined():
     # Run web interface in main thread
     logger.info("Starting combined mode: scheduler + web interface")
     run_web_interface()
+
+
+def export_to_excel():
+    """Export all SENS announcements to Excel spreadsheet."""
+    try:
+        config = get_config()
+        db_manager = DatabaseManager(config.database_path)
+        excel_manager = ExcelManager("data/sens_announcements.xlsx")
+        
+        print("🔄 Exporting SENS announcements to Excel...")
+        
+        # Get all announcements from database
+        announcements = db_manager.get_all_sens_announcements()
+        
+        if not announcements:
+            print("📭 No SENS announcements found in database")
+            print("💡 Run 'python main.py initial-scrape' first to populate the database")
+            return
+        
+        # Create Excel export
+        excel_path = excel_manager.create_or_update_spreadsheet(announcements)
+        
+        print(f"✅ Excel export completed!")
+        print(f"📊 Exported {len(announcements)} SENS announcements")
+        print(f"📁 File location: {excel_path}")
+        print(f"📋 Columns: Date, SENS Number, Organization, Heading, PDF Link, PDF Summary (placeholder), Urgent, Created")
+        
+    except Exception as e:
+        print(f"❌ Excel export failed: {e}")
+        logger.error(f"Excel export failed: {e}")
+
+
+def parse_unparsed_pdfs():
+    """Parse unparsed PDF files and generate AI summaries."""
+    try:
+        config = get_config()
+        db_manager = DatabaseManager(config.database_path)
+        
+        # Get unparsed SENS announcements
+        unparsed = db_manager.get_unparsed_sens()
+        
+        if not unparsed:
+            print("📭 No unparsed PDFs found")
+            logger.info("No unparsed PDFs found")
+            return
+        
+        print(f"🔄 Found {len(unparsed)} unparsed PDFs to process")
+        logger.info(f"Found {len(unparsed)} unparsed PDFs to process")
+        
+        success_count = 0
+        for i, announcement in enumerate(unparsed, 1):
+            try:
+                print(f"📄 Processing {i}/{len(unparsed)}: SENS {announcement.sens_number} - {announcement.company_name}")
+                logger.info(f"Processing SENS {announcement.sens_number}: {announcement.company_name}")
+                
+                # Parse the PDF
+                parsed_announcement = parse_sens_announcement(announcement)
+                
+                # Update database with results
+                if db_manager.update_sens_parsing(parsed_announcement):
+                    success_count += 1
+                    print(f"   ✅ Success - Method: {parsed_announcement.parse_method}")
+                    if parsed_announcement.ai_summary:
+                        print(f"   📝 Summary: {parsed_announcement.ai_summary[:80]}...")
+                    logger.info(f"Successfully processed SENS {announcement.sens_number}")
+                else:
+                    print(f"   ❌ Failed to save parsing results")
+                    logger.error(f"Failed to save parsing results for SENS {announcement.sens_number}")
+                    
+            except Exception as e:
+                print(f"   ❌ Error: {e}")
+                logger.error(f"Error processing SENS {announcement.sens_number}: {e}")
+                continue
+        
+        print(f"\\n🎉 PDF parsing completed: {success_count}/{len(unparsed)} successful")
+        logger.info(f"PDF parsing completed: {success_count}/{len(unparsed)} successful")
+        
+    except Exception as e:
+        print(f"❌ PDF parsing failed: {e}")
+        logger.error(f"PDF parsing failed: {e}")
+
+
+def run_telegram_bot():
+    """Start the interactive Telegram bot."""
+    try:
+        import asyncio
+        asyncio.run(run_bot())
+    except Exception as e:
+        logger.error(f"Error starting Telegram bot: {e}")
+        raise
 
 
 if __name__ == "__main__":

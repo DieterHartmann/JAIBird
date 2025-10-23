@@ -23,6 +23,7 @@ from webdriver_manager.chrome import ChromeDriverManager
 
 from ..database.models import DatabaseManager, SensAnnouncement
 from ..utils.config import get_config
+from ..utils.excel_manager import ExcelManager
 
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,41 @@ class SensScraper:
         self.driver = None
         self.download_path = Path(self.config.webdriver_download_path)
         self.download_path.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize Excel manager
+        self.excel_manager = ExcelManager("data/sens_announcements.xlsx")
+        
+        # Define ignore list for announcements to skip
+        self.ignore_patterns = [
+            "JSE Contact List",
+            "JSE%20Contact%20List", 
+            "JSE Contact List 2024",
+            "JSE%20Contact%20List%202024",
+            "Contact List",
+            "contact list"  # case insensitive match will catch variations
+        ]
+    
+    def _should_ignore_announcement(self, heading: str, company_name: str = "") -> bool:
+        """
+        Check if an announcement should be ignored based on heading or company name.
+        
+        Args:
+            heading: The announcement heading/title
+            company_name: The company name (optional)
+            
+        Returns:
+            True if the announcement should be ignored, False otherwise
+        """
+        # Combine heading and company name for checking
+        text_to_check = f"{heading} {company_name}".lower()
+        
+        # Check against ignore patterns
+        for pattern in self.ignore_patterns:
+            if pattern.lower() in text_to_check:
+                logger.info(f"IGNORE - Skipping announcement matching pattern '{pattern}': {heading}")
+                return True
+                
+        return False
     
     def _setup_driver(self):
         """Set up Chrome WebDriver with appropriate options."""
@@ -75,8 +111,65 @@ class SensScraper:
         chrome_options.add_experimental_option("prefs", prefs)
         
         try:
-            # Use webdriver-manager to automatically handle ChromeDriver
-            service = webdriver.chrome.service.Service(ChromeDriverManager().install())
+            # Bypass WebDriverManager and download ChromeDriver manually for 64-bit
+            import os
+            import requests
+            import zipfile
+            import tempfile
+            from pathlib import Path
+            
+            # First try to find Chrome manually
+            chrome_paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+            ]
+            
+            chrome_path = None
+            for path in chrome_paths:
+                if os.path.exists(path):
+                    chrome_path = path
+                    break
+            
+            if chrome_path:
+                chrome_options.binary_location = chrome_path
+                logger.info(f"Using Chrome from: {chrome_path}")
+            
+            # Manual ChromeDriver download for 64-bit Windows
+            driver_dir = Path.home() / ".jaibird_drivers"
+            driver_dir.mkdir(exist_ok=True)
+            driver_path = driver_dir / "chromedriver.exe"
+            
+            # Download if not exists or force refresh
+            if not driver_path.exists():
+                logger.info("Downloading 64-bit ChromeDriver manually...")
+                chrome_version = "140.0.7339.82"  # Match your Chrome version
+                download_url = f"https://storage.googleapis.com/chrome-for-testing-public/{chrome_version}/win64/chromedriver-win64.zip"
+                
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    zip_path = Path(temp_dir) / "chromedriver.zip"
+                    
+                    # Download the zip file
+                    response = requests.get(download_url)
+                    response.raise_for_status()
+                    
+                    with open(zip_path, 'wb') as f:
+                        f.write(response.content)
+                    
+                    # Extract the exe
+                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                        zip_ref.extractall(temp_dir)
+                    
+                    # Find and copy chromedriver.exe
+                    extracted_driver = Path(temp_dir) / "chromedriver-win64" / "chromedriver.exe"
+                    if extracted_driver.exists():
+                        import shutil
+                        shutil.copy2(extracted_driver, driver_path)
+                        logger.info(f"ChromeDriver downloaded to: {driver_path}")
+                    else:
+                        raise Exception("Failed to extract chromedriver.exe")
+            
+            # Use the manually downloaded driver
+            service = webdriver.chrome.service.Service(str(driver_path))
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             self.driver.set_page_load_timeout(self.config.webdriver_timeout)
             logger.info("Chrome WebDriver initialized successfully")
@@ -101,11 +194,13 @@ class SensScraper:
     def _click_element_safely(self, xpath: str, description: str = "") -> bool:
         """Safely click an element with error handling."""
         try:
-            element = self._wait_for_element(xpath, 10)
+            element = self._wait_for_element(xpath, 15)  # Longer timeout for JSE
             if element:
+                # Scroll element into view first
+                self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                time.sleep(1)
                 element.click()
-                logger.debug(f"Clicked element: {description}")
-                time.sleep(2)  # Allow page to load
+                logger.info(f"Successfully clicked: {description}")
                 return True
             else:
                 logger.warning(f"Could not find element to click: {description}")
@@ -115,15 +210,56 @@ class SensScraper:
             return False
     
     def _extract_sens_number(self, sens_text: str) -> str:
-        """Extract SENS number from text."""
-        # Look for patterns like "SENS 123456" or just numbers
+        """Extract SENS number from text like 'S510561 | 2025/09/15 16:45'."""
+        # Look for patterns like "S510561" (S followed by digits)
+        match = re.search(r'(S\d{6})', sens_text.strip())
+        if match:
+            return match.group(1)
+        
+        # Fallback: look for old patterns like "SENS 123456" or just numbers
         match = re.search(r'(?:SENS\s*)?(\d+)', sens_text.strip())
         if match:
             return match.group(1)
+            
         return sens_text.strip()
     
+    def _extract_sens_info(self, sens_text: str) -> Tuple[str, Optional[datetime]]:
+        """Extract SENS number and publication date from text like 'S510561 | 2025/09/17 09:30'."""
+        sens_number = ""
+        pub_date = None
+        
+        try:
+            # Look for the full pattern: S510561 | 2025/09/17 09:30
+            match = re.search(r'(S\d{6})\s*\|\s*(\d{4}/\d{2}/\d{2})\s+(\d{2}:\d{2})', sens_text.strip())
+            if match:
+                sens_number = match.group(1)
+                date_str = match.group(2)
+                time_str = match.group(3)
+                
+                # Parse the date and time
+                datetime_str = f"{date_str} {time_str}"
+                pub_date = datetime.strptime(datetime_str, "%Y/%m/%d %H:%M")
+                
+                logger.info(f"SUCCESS: Extracted SENS info - Number: {sens_number}, Date: {pub_date}")
+                return sens_number, pub_date
+            
+            # Fallback to just extract SENS number
+            sens_number = self._extract_sens_number(sens_text)
+            logger.warning(f"WARN: Could not extract publication date from '{sens_text}', got SENS: {sens_number}")
+            
+        except Exception as e:
+            logger.error(f"ERROR: Failed to parse SENS info from '{sens_text}': {e}")
+            sens_number = self._extract_sens_number(sens_text)
+        
+        return sens_number, pub_date
+    
     def _is_urgent_announcement(self, title: str, company_name: str) -> Tuple[bool, str]:
-        """Determine if an announcement is urgent based on keywords."""
+        """Determine if an announcement is urgent based on keywords or watchlist telegram flag."""
+        # First check if company is flagged for Telegram notifications
+        if self.db_manager.should_send_telegram_for_company(company_name):
+            return True, f"Company '{company_name}' is flagged for Telegram notifications"
+        
+        # Fallback to keyword-based urgency detection
         urgent_keywords = self.config.get_urgent_keywords_list()
         title_lower = title.lower()
         company_lower = company_name.lower()
@@ -173,18 +309,72 @@ class SensScraper:
         announcements = []
         
         try:
-            # Find all announcement list items
-            announcement_items = self.driver.find_elements(
-                By.XPATH, 
-                "//div[contains(@class, 'announcement')]//ul/li[position()=1]"
-            )
+            # Debug: Save page source for inspection
+            if logger.isEnabledFor(logging.DEBUG):
+                with open("debug_page.html", "w", encoding="utf-8") as f:
+                    f.write(self.driver.page_source)
+                logger.debug("Saved page source to debug_page.html")
             
-            # If the specific xpath doesn't work, try a more general approach
-            if not announcement_items:
+            # Try multiple strategies to find announcements
+            announcement_items = []
+            
+            # Strategy 1: Original specific xpath
+            try:
                 announcement_items = self.driver.find_elements(
-                    By.XPATH,
-                    "//ul/li[a[contains(@href, '.pdf')]]"
+                    By.XPATH, 
+                    "//div[contains(@class, 'announcement')]//ul/li[position()=1]"
                 )
+                if announcement_items:
+                    logger.info(f"Strategy 1 found {len(announcement_items)} items")
+            except Exception as e:
+                logger.debug(f"Strategy 1 failed: {e}")
+            
+            # Strategy 2: Look for PDF links in list items
+            if not announcement_items:
+                try:
+                    announcement_items = self.driver.find_elements(
+                        By.XPATH,
+                        "//ul/li[a[contains(@href, '.pdf')]]"
+                    )
+                    if announcement_items:
+                        logger.info(f"Strategy 2 found {len(announcement_items)} items")
+                except Exception as e:
+                    logger.debug(f"Strategy 2 failed: {e}")
+            
+            # Strategy 3: Any link with PDF
+            if not announcement_items:
+                try:
+                    pdf_links = self.driver.find_elements(By.XPATH, "//a[contains(@href, '.pdf')]")
+                    # Convert to parent li elements
+                    announcement_items = []
+                    for link in pdf_links:
+                        try:
+                            li_parent = link.find_element(By.XPATH, "./ancestor::li[1]")
+                            if li_parent not in announcement_items:
+                                announcement_items.append(li_parent)
+                        except:
+                            # If no li parent, create a wrapper
+                            announcement_items.append(link)
+                    if announcement_items:
+                        logger.info(f"Strategy 3 found {len(announcement_items)} items")
+                except Exception as e:
+                    logger.debug(f"Strategy 3 failed: {e}")
+            
+            # Strategy 4: Look for any structure with SENS
+            if not announcement_items:
+                try:
+                    sens_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), 'SENS')]")
+                    for sens_elem in sens_elements:
+                        try:
+                            li_parent = sens_elem.find_element(By.XPATH, "./ancestor::li[1]")
+                            if li_parent not in announcement_items:
+                                announcement_items.append(li_parent)
+                        except:
+                            pass
+                    if announcement_items:
+                        logger.info(f"Strategy 4 found {len(announcement_items)} items")
+                except Exception as e:
+                    logger.debug(f"Strategy 4 failed: {e}")
             
             logger.info(f"Found {len(announcement_items)} potential announcements on page")
             
@@ -195,34 +385,111 @@ class SensScraper:
                     pdf_url = pdf_link_element.get_attribute('href')
                     title = pdf_link_element.text.strip()
                     
-                    # Extract company name (usually in a nested ul/li)
-                    company_element = None
+                    # Extract company name with multiple strategies
+                    company_name = ""
+                    
+                    # Strategy 1: Original nested ul/li approach
                     try:
                         company_element = item.find_element(By.XPATH, ".//ul/li/a")
                         company_name = company_element.text.strip()
+                        logger.debug(f"Company name strategy 1 worked: {company_name}")
                     except NoSuchElementException:
-                        # Try alternative xpath
+                        pass
+                    
+                    # Strategy 2: Alternative xpath
+                    if not company_name:
                         try:
                             company_element = item.find_element(By.XPATH, ".//li[2]//a")
                             company_name = company_element.text.strip()
+                            logger.debug(f"Company name strategy 2 worked: {company_name}")
                         except NoSuchElementException:
-                            logger.warning(f"Could not find company name for announcement {i}")
-                            continue
+                            pass
                     
-                    # Extract SENS number
+                    # Strategy 3: Look for any text that looks like a company name
+                    if not company_name:
+                        try:
+                            # Get all text in the item and look for company patterns
+                            item_text = item.text
+                            lines = [line.strip() for line in item_text.split('\n') if line.strip()]
+                            
+                            for line in lines:
+                                # Skip the PDF title line and SENS number
+                                if 'SENS' in line.upper() or line == title:
+                                    continue
+                                # Look for lines that could be company names (not too short, not too long)
+                                if 3 <= len(line) <= 50 and not line.isdigit():
+                                    company_name = line
+                                    logger.debug(f"Company name strategy 3 worked: {company_name}")
+                                    break
+                        except Exception as e:
+                            logger.debug(f"Company name strategy 3 failed: {e}")
+                    
+                    # Strategy 4: Extract from PDF filename or URL
+                    if not company_name:
+                        try:
+                            # Sometimes company name is in the PDF URL or filename
+                            url_parts = pdf_url.split('/')
+                            filename = url_parts[-1] if url_parts else ""
+                            if filename and len(filename) > 10:
+                                # Remove .pdf and try to extract meaningful name
+                                base_name = filename.replace('.pdf', '').replace('_', ' ').replace('-', ' ')
+                                if len(base_name) > 3:
+                                    company_name = base_name
+                                    logger.debug(f"Company name strategy 4 worked: {company_name}")
+                        except Exception as e:
+                            logger.debug(f"Company name strategy 4 failed: {e}")
+                    
+                    if not company_name:
+                        logger.warning(f"Could not find company name for announcement {i}, using 'Unknown Company'")
+                        company_name = "Unknown Company"
+                        # Don't skip - still process the announcement
+                    
+                    # Check if this announcement should be ignored
+                    if self._should_ignore_announcement(title, company_name):
+                        continue
+                    
+                    # Extract SENS number and publication date (format: S510561 | 2025/09/17 09:30)
                     sens_number_element = None
                     sens_number = ""
+                    pub_date = None
+                    
                     try:
-                        sens_number_element = item.find_element(By.XPATH, ".//div[contains(text(), 'SENS') or contains(text(), 'SEN')]")
-                        sens_number = self._extract_sens_number(sens_number_element.text)
-                    except NoSuchElementException:
-                        # Try to extract from title or URL
-                        sens_match = re.search(r'(?:SENS|SEN)\s*(\d+)', title, re.IGNORECASE)
-                        if sens_match:
-                            sens_number = sens_match.group(1)
-                        else:
-                            # Use timestamp as fallback
-                            sens_number = f"TEMP_{int(datetime.now().timestamp())}"
+                        # Look for div containing S followed by digits and date/time
+                        sens_number_element = item.find_element(By.XPATH, ".//div[contains(text(), 'S5') and contains(text(), '|')]")
+                        sens_number, pub_date = self._extract_sens_info(sens_number_element.text)
+                        logger.info(f"SUCCESS: Found SENS element with text: '{sens_number_element.text}' -> Number: {sens_number}, Date: {pub_date}")
+                    except NoSuchElementException as e:
+                        logger.warning(f"WARN: Primary XPath failed for item {i}: No SENS div found")
+                        # Try alternative XPath - look for any div with S followed by 6 digits
+                        try:
+                            sens_number_element = item.find_element(By.XPATH, ".//div[contains(text(), 'S51')]")
+                            sens_number, pub_date = self._extract_sens_info(sens_number_element.text)
+                            logger.info(f"SUCCESS: Found SENS (alternative) with text: '{sens_number_element.text}' -> Number: {sens_number}, Date: {pub_date}")
+                        except NoSuchElementException as e2:
+                            logger.warning(f"WARN: Alternative XPath also failed for item {i}: No SENS div found")
+                            # Log the item text for debugging
+                            try:
+                                item_text = item.text
+                                logger.warning(f"DEBUG: Item {i} full text: '{item_text}'")
+                                
+                                # Try to extract from title or item text
+                                sens_match = re.search(r'(S\d{6})', item_text, re.IGNORECASE)
+                                if sens_match:
+                                    sens_number = sens_match.group(1)
+                                    logger.info(f"SUCCESS: Extracted SENS from item text: '{sens_number}'")
+                                else:
+                                    # Try from title
+                                    sens_match = re.search(r'(S\d{6})', title, re.IGNORECASE)
+                                    if sens_match:
+                                        sens_number = sens_match.group(1)
+                                        logger.info(f"SUCCESS: Extracted SENS from title: '{sens_number}'")
+                                    else:
+                                        # Use timestamp as fallback
+                                        sens_number = f"TEMP_{int(datetime.now().timestamp())}"
+                                        logger.warning(f"WARN: Could not extract SENS number from anywhere, using fallback: {sens_number}")
+                            except Exception as e3:
+                                sens_number = f"TEMP_{int(datetime.now().timestamp())}"
+                                logger.error(f"ERROR: Error getting item text for item {i}: {e3}, using fallback: {sens_number}")
                     
                     # Skip if we already have this SENS
                     if self.db_manager.sens_exists(sens_number):
@@ -242,7 +509,7 @@ class SensScraper:
                         title=title,
                         pdf_url=pdf_url,
                         local_pdf_path=local_pdf_path or "",
-                        date_published=datetime.now(),  # We'll improve this later
+                        date_published=pub_date or datetime.now(),  # Use extracted publication date or fallback to now
                         is_urgent=is_urgent,
                         urgent_reason=urgent_reason
                     )
@@ -267,12 +534,14 @@ class SensScraper:
             self._setup_driver()
             self.driver.get(self.JSE_SENS_URL)
             
-            # Wait for page to load
-            time.sleep(5)
+            # Wait for page to load completely
+            logger.info("Waiting for JSE page to load completely...")
+            time.sleep(10)
             
             # Click "Last 30 days" button
             if self._click_element_safely(self.XPATH_LAST_30_DAYS, "Last 30 days button"):
-                time.sleep(5)  # Wait for results to load
+                logger.info("Waiting for SENS announcements to load (30 seconds - JSE is very slow)...")
+                time.sleep(30)  # Wait for results to load - JSE is VERY slow!
             else:
                 logger.warning("Could not click 'Last 30 days' button, proceeding with default view")
             
@@ -289,6 +558,15 @@ class SensScraper:
                     logger.error(f"Failed to save announcement {announcement.sens_number}: {e}")
             
             logger.info(f"Initial scrape completed: {saved_count} new announcements saved")
+            
+            # Create/update Excel spreadsheet with all announcements
+            if announcements:
+                try:
+                    excel_path = self.excel_manager.create_or_update_spreadsheet(announcements)
+                    logger.info(f"Excel spreadsheet created/updated: {excel_path}")
+                except Exception as e:
+                    logger.error(f"Failed to create Excel spreadsheet: {e}")
+            
             return announcements
             
         except Exception as e:
@@ -306,30 +584,45 @@ class SensScraper:
             self._setup_driver()
             self.driver.get(self.JSE_SENS_URL)
             
-            # Wait for page to load
-            time.sleep(5)
+            # Wait for page to load completely
+            logger.info("Waiting for JSE page to load completely...")
+            time.sleep(10)
             
             # Click "Today's announcements" button to ensure we're looking at today
             if self._click_element_safely(self.XPATH_TODAY_ANNOUNCEMENTS, "Today's announcements button"):
-                time.sleep(5)  # Wait for results to load
+                logger.info("Waiting for SENS announcements to load (15 seconds)...")
+                time.sleep(15)  # Wait for results to load - JSE is slow!
             
             # Scrape announcements
             announcements = self._scrape_announcements_from_page()
             
             # Save new announcements to database
             saved_count = 0
+            new_announcements: List[SensAnnouncement] = []
             for announcement in announcements:
                 try:
                     if not self.db_manager.sens_exists(announcement.sens_number):
                         self.db_manager.add_sens_announcement(announcement)
                         saved_count += 1
+                        new_announcements.append(announcement)
                     else:
                         logger.debug(f"SENS {announcement.sens_number} already exists")
                 except Exception as e:
                     logger.error(f"Failed to save announcement {announcement.sens_number}: {e}")
             
             logger.info(f"Daily scrape completed: {saved_count} new announcements found")
-            return [ann for ann in announcements if not self.db_manager.sens_exists(ann.sens_number)]
+            
+            # Update Excel spreadsheet if we have new announcements
+            if saved_count > 0:
+                try:
+                    if new_announcements:
+                        excel_path = self.excel_manager.create_or_update_spreadsheet(new_announcements)
+                        logger.info(f"Excel spreadsheet updated: {excel_path}")
+                except Exception as e:
+                    logger.error(f"Failed to update Excel spreadsheet: {e}")
+            
+            # Return only the newly saved announcements so downstream processing can act on them
+            return new_announcements
             
         except Exception as e:
             logger.error(f"Error during daily scrape: {e}")

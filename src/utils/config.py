@@ -19,6 +19,9 @@ class JAIBirdConfig(BaseSettings):
     # API KEYS
     # ============================================================================
     dropbox_access_token: str = Field(..., env="DROPBOX_ACCESS_TOKEN")
+    dropbox_refresh_token: Optional[str] = Field(None, env="DROPBOX_REFRESH_TOKEN")
+    dropbox_app_key: Optional[str] = Field(None, env="DROPBOX_APP_KEY")
+    dropbox_app_secret: Optional[str] = Field(None, env="DROPBOX_APP_SECRET")
     telegram_bot_token: str = Field(..., env="TELEGRAM_BOT_TOKEN")
     telegram_chat_id: str = Field(..., env="TELEGRAM_CHAT_ID")
     anthropic_api_key: Optional[str] = Field(None, env="ANTHROPIC_API_KEY")
@@ -83,10 +86,49 @@ class JAIBirdConfig(BaseSettings):
     webdriver_download_path: str = Field("./data/sens_pdfs/temp/", env="WEBDRIVER_DOWNLOAD_PATH")
     
     # ============================================================================
+    # AI CONFIGURATION - PDF PARSING & SUMMARIZATION
+    # ============================================================================
+    
+    # Main AI API Keys (shared across functions)
+    openai_api_key: str = Field("", env="OPENAI_API_KEY")
+    anthropic_api_key: str = Field("", env="ANTHROPIC_API_KEY")
+    
+    # PDF Parsing (OCR cleanup, document structure extraction)
+    pdf_parse_provider: str = Field("openai", env="PDF_PARSE_PROVIDER")  # openai or anthropic
+    pdf_parse_openai_key: str = Field("", env="PDF_PARSE_OPENAI_KEY")
+    pdf_parse_openai_model: str = Field("gpt-4", env="PDF_PARSE_OPENAI_MODEL")
+    pdf_parse_anthropic_key: str = Field("", env="PDF_PARSE_ANTHROPIC_KEY")
+    pdf_parse_anthropic_model: str = Field("claude-3-sonnet-20240229", env="PDF_PARSE_ANTHROPIC_MODEL")
+    
+    # Summary Generation (financial analysis, concise summaries)
+    summary_provider: str = Field("openai", env="SUMMARY_PROVIDER")  # openai or anthropic
+    summary_openai_key: str = Field("", env="SUMMARY_OPENAI_KEY")
+    summary_openai_model: str = Field("gpt-4", env="SUMMARY_OPENAI_MODEL")
+    summary_anthropic_key: str = Field("", env="SUMMARY_ANTHROPIC_KEY")
+    summary_anthropic_model: str = Field("claude-3-sonnet-20240229", env="SUMMARY_ANTHROPIC_MODEL")
+    summary_max_words: int = Field(50, env="SUMMARY_MAX_WORDS")
+    
+    def get_pdf_parse_openai_key(self) -> str:
+        """Get OpenAI key for PDF parsing with fallback to main key."""
+        return self.pdf_parse_openai_key or self.openai_api_key
+    
+    def get_pdf_parse_anthropic_key(self) -> str:
+        """Get Anthropic key for PDF parsing with fallback to main key."""
+        return self.pdf_parse_anthropic_key or self.anthropic_api_key
+    
+    def get_summary_openai_key(self) -> str:
+        """Get OpenAI key for summaries with fallback to main key."""
+        return self.summary_openai_key or self.openai_api_key
+    
+    def get_summary_anthropic_key(self) -> str:
+        """Get Anthropic key for summaries with fallback to main key."""
+        return self.summary_anthropic_key or self.anthropic_api_key
+    
+    # ============================================================================
     # NOTIFICATION PREFERENCES
     # ============================================================================
     urgent_keywords: str = Field(
-        "profit warning,delisting,suspension,trading halt,cautionary,acquisition,merger,rights issue",
+        "profit warning,delisting,suspension,trading halt,cautionary,acquisition,merger,rights issue,late submission of condensed financial statements,late submission",
         env="URGENT_KEYWORDS"
     )
     telegram_notifications_enabled: bool = Field(True, env="TELEGRAM_NOTIFICATIONS_ENABLED")

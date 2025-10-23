@@ -163,19 +163,59 @@ def create_app():
     
     @app.route('/api/scrape', methods=['POST'])
     def api_scrape():
-        """API endpoint to trigger SENS scraping."""
+        """API endpoint to trigger SENS scraping with AI parsing and notifications."""
         try:
+            from ..ai.pdf_parser import parse_sens_announcement
+            from ..utils.dropbox_manager import DropboxManager
+
             scraper = SensScraper(db_manager)
             announcements = scraper.scrape_daily_announcements()
-            
-            # Process notifications for new announcements
+
+            dropbox_manager = DropboxManager()
+            # Company enrichment
+            from ..company.enricher import CompanyEnricher
+            from ..company.company_db import CompanyDB
+            enricher = CompanyEnricher(CompanyDB())
+            processed = 0
+
+            # Process AI parsing, upload, and notifications for new announcements
             for announcement in announcements:
-                notification_manager.process_new_announcement(announcement)
-            
+                try:
+                    # Parse PDF and generate AI summary for ALL new announcements
+                    parsed = parse_sens_announcement(announcement)
+                    if getattr(parsed, 'ai_summary', None):
+                        # Persist parsing results via model-aware helper
+                        announcement.pdf_content = getattr(parsed, 'pdf_content', '')
+                        announcement.ai_summary = parsed.ai_summary
+                        announcement.parse_method = getattr(parsed, 'parse_method', '')
+                        announcement.parse_status = getattr(parsed, 'parse_status', 'completed')
+                        announcement.parsed_at = getattr(parsed, 'parsed_at', None)
+                        db_manager.update_sens_parsing(announcement)
+
+                    # Upload to Dropbox if available
+                    if announcement.local_pdf_path:
+                        dropbox_path = dropbox_manager.upload_pdf(
+                            announcement.local_pdf_path,
+                            announcement.sens_number,
+                            announcement.company_name
+                        )
+                        if dropbox_path:
+                            announcement.dropbox_pdf_path = dropbox_path
+
+                    # Send notifications
+                    notification_manager.process_new_announcement(announcement)
+
+                    # Enrich company intelligence DB
+                    enricher.enrich_from_announcement(announcement)
+                    processed += 1
+                except Exception as inner_e:
+                    logger.error(f"Failed to process new announcement {announcement.sens_number}: {inner_e}")
+
             return jsonify({
                 'status': 'success',
                 'message': f'Successfully scraped {len(announcements)} new announcements',
-                'count': len(announcements)
+                'count': len(announcements),
+                'processed': processed
             })
         except Exception as e:
             logger.error(f"API scrape error: {e}")
@@ -225,6 +265,43 @@ def create_app():
         except Exception as e:
             logger.error(f"API stats error: {e}")
             return jsonify({'error': str(e)}), 500
+    
+    @app.route('/api/toggle_telegram', methods=['POST'])
+    def api_toggle_telegram():
+        """API endpoint to toggle Telegram notifications for a company."""
+        try:
+            data = request.get_json()
+            
+            if not data or 'jse_code' not in data or 'send_telegram' not in data:
+                return jsonify({
+                    'status': 'error',
+                    'error': 'Missing required fields: jse_code, send_telegram'
+                }), 400
+            
+            jse_code = data['jse_code']
+            send_telegram = data['send_telegram']
+            
+            # Update the company's Telegram flag
+            success = db_manager.update_company_telegram_flag(jse_code, send_telegram)
+            
+            if success:
+                action = "enabled" if send_telegram else "disabled"
+                return jsonify({
+                    'status': 'success',
+                    'message': f'Telegram notifications {action} for {jse_code}'
+                })
+            else:
+                return jsonify({
+                    'status': 'error',
+                    'error': f'Company with JSE code {jse_code} not found'
+                }), 404
+                
+        except Exception as e:
+            logger.error(f"API toggle telegram error: {e}")
+            return jsonify({
+                'status': 'error',
+                'error': str(e)
+            }), 500
     
     # Error handlers
     @app.errorhandler(404)

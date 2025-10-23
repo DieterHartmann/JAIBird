@@ -9,6 +9,10 @@
 # Dropbox API Configuration
 # Get your access token from: https://www.dropbox.com/developers/apps
 DROPBOX_ACCESS_TOKEN=your_dropbox_access_token_here
+# Optional: For automatic token refresh (recommended for production)
+DROPBOX_REFRESH_TOKEN=your_dropbox_refresh_token_here
+DROPBOX_APP_KEY=your_dropbox_app_key_here
+DROPBOX_APP_SECRET=your_dropbox_app_secret_here
 
 # Telegram Bot Configuration
 # Create a bot via @BotFather on Telegram
@@ -91,6 +95,25 @@ LOG_FILE_PATH=./logs/jaibird.log
 WEBDRIVER_HEADLESS=true
 WEBDRIVER_TIMEOUT=30
 WEBDRIVER_DOWNLOAD_PATH=./data/sens_pdfs/temp/
+
+# ============================================================================
+# AI CONFIGURATION - PDF PARSING & SUMMARIZATION
+# ============================================================================
+
+# PDF Parsing (OCR cleanup, document structure extraction)
+PDF_PARSE_PROVIDER=openai
+PDF_PARSE_OPENAI_KEY=your_openai_api_key_here
+PDF_PARSE_OPENAI_MODEL=gpt-4
+PDF_PARSE_ANTHROPIC_KEY=your_anthropic_api_key_here
+PDF_PARSE_ANTHROPIC_MODEL=claude-3-sonnet-20240229
+
+# Summary Generation (financial analysis, concise summaries)
+SUMMARY_PROVIDER=openai
+SUMMARY_OPENAI_KEY=your_openai_api_key_here
+SUMMARY_OPENAI_MODEL=gpt-4
+SUMMARY_ANTHROPIC_KEY=your_anthropic_api_key_here
+SUMMARY_ANTHROPIC_MODEL=claude-3-sonnet-20240229
+SUMMARY_MAX_WORDS=50
 
 # ============================================================================
 # NOTIFICATION PREFERENCES

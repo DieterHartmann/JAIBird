@@ -29,6 +29,7 @@
                                 <th>Company Name</th>
                                 <th>JSE Code</th>
                                 <th>Added Date</th>
+                                <th>Telegram</th>
                                 <th>Notes</th>
                                 <th>Actions</th>
                             </tr>
@@ -51,6 +52,21 @@
                                     <small class="text-muted">
                                         {{ company.added_date.strftime('%Y-%m-%d') if company.added_date else 'Unknown' }}
                                     </small>
+                                </td>
+                                <td>
+                                    <div class="form-check form-switch">
+                                        <input class="form-check-input" type="checkbox" 
+                                               id="telegram_{{ company.jse_code }}"
+                                               {{ 'checked' if company.send_telegram else '' }}
+                                               onchange="toggleTelegram('{{ company.jse_code }}', this.checked)">
+                                        <label class="form-check-label" for="telegram_{{ company.jse_code }}">
+                                            {% if company.send_telegram %}
+                                                <i class="bi bi-telegram text-primary"></i>
+                                            {% else %}
+                                                <i class="bi bi-telegram text-muted"></i>
+                                            {% endif %}
+                                        </label>
+                                    </div>
                                 </td>
                                 <td>
                                     {% if company.notes %}
@@ -133,6 +149,66 @@ function confirmRemove(jseCode, companyName) {
     document.getElementById('companyName').textContent = companyName;
     document.getElementById('confirmRemoveBtn').href = '{{ url_for("remove_company", jse_code="") }}' + jseCode;
     new bootstrap.Modal(document.getElementById('removeModal')).show();
+}
+
+async function toggleTelegram(jseCode, enabled) {
+    try {
+        const response = await fetch('/api/toggle_telegram', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                jse_code: jseCode,
+                send_telegram: enabled
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(result.error || 'Failed to update Telegram setting');
+        }
+        
+        // Update the icon color
+        const label = document.querySelector(`label[for="telegram_${jseCode}"] i`);
+        if (enabled) {
+            label.className = 'bi bi-telegram text-primary';
+        } else {
+            label.className = 'bi bi-telegram text-muted';
+        }
+        
+        // Show success message
+        showToast(result.message, 'success');
+        
+    } catch (error) {
+        console.error('Error toggling Telegram:', error);
+        
+        // Revert the checkbox
+        const checkbox = document.getElementById(`telegram_${jseCode}`);
+        checkbox.checked = !enabled;
+        
+        showToast('Failed to update Telegram setting: ' + error.message, 'error');
+    }
+}
+
+function showToast(message, type = 'info') {
+    // Simple toast notification
+    const toast = document.createElement('div');
+    toast.className = `alert alert-${type === 'error' ? 'danger' : 'success'} alert-dismissible fade show position-fixed`;
+    toast.style.cssText = 'top: 20px; right: 20px; z-index: 9999; max-width: 300px;';
+    toast.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    document.body.appendChild(toast);
+    
+    // Auto-remove after 3 seconds
+    setTimeout(() => {
+        if (toast.parentNode) {
+            toast.parentNode.removeChild(toast);
+        }
+    }, 3000);
 }
 </script>
 {% endblock %}

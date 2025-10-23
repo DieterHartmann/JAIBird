@@ -6,10 +6,12 @@ Handles Telegram and email notifications for SENS announcements.
 import smtplib
 import logging
 import subprocess
+import sys
 import json
 import tempfile
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import List, Optional
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -20,6 +22,7 @@ import requests
 
 from ..database.models import DatabaseManager, SensAnnouncement, Notification
 from ..utils.config import get_config
+from ..utils.dropbox_manager import DropboxManager
 
 
 logger = logging.getLogger(__name__)
@@ -47,6 +50,15 @@ class TelegramNotifier:
             return True
         
         try:
+            # Prefer a Dropbox shared link if available
+            pdf_link = None
+            try:
+                if getattr(announcement, 'dropbox_pdf_path', ''):
+                    dbx = DropboxManager()
+                    pdf_link = dbx.create_shared_link(announcement.dropbox_pdf_path)
+            except Exception as _e:
+                logger.debug(f"Could not create Dropbox shared link: {_e}")
+
             # Create message data
             message_data = {
                 'type': 'urgent',
@@ -55,7 +67,10 @@ class TelegramNotifier:
                 'title': announcement.title,
                 'urgent_reason': announcement.urgent_reason,
                 'date_published': announcement.date_published.isoformat() if announcement.date_published else None,
-                'pdf_url': announcement.pdf_url
+                # Prefer Dropbox shared link; fallback to original JSE URL
+                'pdf_link': pdf_link or announcement.pdf_url,
+                'ai_summary': getattr(announcement, 'ai_summary', ''),
+                'local_pdf_path': getattr(announcement, 'local_pdf_path', '')
             }
             
             return self._send_telegram_message(message_data)
@@ -81,6 +96,30 @@ class TelegramNotifier:
             logger.error(f"Failed to send test Telegram message: {e}")
             return False
     
+    def send_pdf_file(self, sens_number: str, pdf_path: str, company_name: str = "") -> bool:
+        """Send PDF file via Telegram."""
+        if not self.config.telegram_notifications_enabled:
+            logger.warning("Telegram notifications are disabled")
+            return False
+        
+        if not Path(pdf_path).exists():
+            logger.error(f"PDF file not found: {pdf_path}")
+            return False
+        
+        try:
+            message_data = {
+                'type': 'pdf',
+                'sens_number': sens_number,
+                'pdf_path': pdf_path,
+                'company_name': company_name
+            }
+            
+            return self._send_telegram_message(message_data)
+            
+        except Exception as e:
+            logger.error(f"Failed to send PDF via Telegram: {e}")
+            return False
+    
     def _send_telegram_message(self, message_data: dict) -> bool:
         """Send message via subprocess to avoid async conflicts."""
         try:
@@ -91,8 +130,10 @@ class TelegramNotifier:
             
             # Call the telegram sender subprocess
             script_path = os.path.join(os.path.dirname(__file__), 'telegram_sender.py')
+            # Use the same interpreter to avoid PATH issues
+            python_exe = sys.executable or 'python'
             result = subprocess.run([
-                'python', script_path, temp_file
+                python_exe, script_path, temp_file
             ], capture_output=True, text=True, timeout=30)
             
             # Clean up temp file
@@ -118,6 +159,21 @@ class EmailNotifier:
     
     def __init__(self):
         self.config = get_config()
+        self._dbx = None
+    
+    def _resolve_pdf_link(self, announcement: SensAnnouncement) -> str:
+        """Prefer a Dropbox shared link; fallback to original URL or empty string."""
+        try:
+            dropbox_path = getattr(announcement, 'dropbox_pdf_path', '')
+            if dropbox_path:
+                if self._dbx is None:
+                    self._dbx = DropboxManager()
+                link = self._dbx.create_shared_link(dropbox_path)
+                if link:
+                    return link
+        except Exception as e:
+            logger.debug(f"Could not create Dropbox shared link for email: {e}")
+        return getattr(announcement, 'pdf_url', '') or ''
     
     def _send_email(self, msg):
         """Helper method to send email with proper SSL/TLS handling."""
@@ -244,6 +300,7 @@ class EmailNotifier:
                     css_class += " urgent"
                 elif self._is_watchlist_company(announcement.company_name):
                     css_class += " watchlist"
+                pdf_link = self._resolve_pdf_link(announcement)
                 
                 html += f"""
                 <div class="{css_class}">
@@ -252,7 +309,7 @@ class EmailNotifier:
                     <div class="title">{announcement.title}</div>
                     <div class="date">{announcement.date_published.strftime('%H:%M') if announcement.date_published else 'Unknown time'}</div>
                     {f'<div style="color: #dc2626; font-weight: bold;">⚠️ {announcement.urgent_reason}</div>' if announcement.urgent_reason else ''}
-                    {f'<div><a href="{announcement.pdf_url}">View PDF</a></div>' if announcement.pdf_url else ''}
+                    {f'<div><a href="{pdf_link}">View PDF</a></div>' if pdf_link else ''}
                 </div>
                 """
         
@@ -270,6 +327,7 @@ class EmailNotifier:
     
     def _create_watchlist_alert_html(self, announcement: SensAnnouncement) -> str:
         """Create HTML content for watchlist alert email."""
+        pdf_link = self._resolve_pdf_link(announcement)
         html = f"""
         <!DOCTYPE html>
         <html>
@@ -300,7 +358,7 @@ class EmailNotifier:
                     <div class="details">
                         <p><strong>Published:</strong> {announcement.date_published.strftime('%Y-%m-%d %H:%M') if announcement.date_published else 'Unknown'}</p>
                         {f'<p><strong>⚠️ Urgent:</strong> {announcement.urgent_reason}</p>' if announcement.urgent_reason else ''}
-                        {f'<p><strong>PDF:</strong> <a href="{announcement.pdf_url}">Download PDF</a></p>' if announcement.pdf_url else ''}
+                        {f'<p><strong>PDF:</strong> <a href="{pdf_link}">Download PDF</a></p>' if pdf_link else ''}
                     </div>
                 </div>
                 

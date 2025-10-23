@@ -112,9 +112,20 @@
                                         <strong>{{ sens.company_name }}</strong>
                                     </td>
                                     <td>
-                                        <span class="text-truncate" style="max-width: 200px; display: inline-block;" 
-                                              title="{{ sens.title }}">
+                                        <span class="text-truncate sens-title-hover" 
+                                              style="max-width: 200px; display: inline-block; cursor: help;" 
+                                              {% if sens.ai_summary %}
+                                              data-bs-toggle="tooltip" 
+                                              data-bs-placement="top" 
+                                              data-bs-html="true"
+                                              data-bs-title="<strong>AI Summary:</strong><br>{{ sens.ai_summary }}"
+                                              {% else %}
+                                              title="{{ sens.title }}"
+                                              {% endif %}>
                                             {{ sens.title }}
+                                            {% if sens.ai_summary %}
+                                                <i class="bi bi-robot text-info ms-1" style="font-size: 0.8em;"></i>
+                                            {% endif %}
                                         </span>
                                         {% if sens.pdf_url %}
                                             <a href="{{ sens.pdf_url }}" target="_blank" class="ms-2">

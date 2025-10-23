@@ -23,6 +23,7 @@ class Company:
     jse_code: str = ""
     added_date: Optional[datetime] = None
     active_status: bool = True
+    send_telegram: bool = False
     notes: str = ""
 
 
@@ -41,6 +42,11 @@ class SensAnnouncement:
     processed: bool = False
     is_urgent: bool = False
     urgent_reason: str = ""
+    pdf_content: str = ""
+    ai_summary: str = ""
+    parse_method: str = ""  # 'ocr', 'ai', 'failed'
+    parse_status: str = "pending"  # 'pending', 'processing', 'completed', 'failed'
+    parsed_at: Optional[datetime] = None
 
 
 @dataclass
@@ -117,7 +123,12 @@ class DatabaseManager:
                     date_scraped TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     processed BOOLEAN DEFAULT FALSE,
                     is_urgent BOOLEAN DEFAULT FALSE,
-                    urgent_reason TEXT DEFAULT ''
+                    urgent_reason TEXT DEFAULT '',
+                    pdf_content TEXT DEFAULT '',
+                    ai_summary TEXT DEFAULT '',
+                    parse_method TEXT DEFAULT '',
+                    parse_status TEXT DEFAULT 'pending',
+                    parsed_at TIMESTAMP
                 )
             """)
             
@@ -133,6 +144,9 @@ class DatabaseManager:
                     FOREIGN KEY (sens_id) REFERENCES sens_announcements (id)
                 )
             """)
+            
+            # Run database migrations
+            self._run_migrations(cursor)
             
             # Create config_settings table
             cursor.execute("""
@@ -155,6 +169,42 @@ class DatabaseManager:
             
             logger.info("Database initialized successfully")
     
+    def _run_migrations(self, cursor):
+        """Run database migrations to add new columns."""
+        try:
+            # Check if new columns exist in sens_announcements table
+            cursor.execute("PRAGMA table_info(sens_announcements)")
+            sens_columns = [row[1] for row in cursor.fetchall()]
+            
+            sens_migrations = [
+                ("pdf_content", "ALTER TABLE sens_announcements ADD COLUMN pdf_content TEXT DEFAULT ''"),
+                ("ai_summary", "ALTER TABLE sens_announcements ADD COLUMN ai_summary TEXT DEFAULT ''"),
+                ("parse_method", "ALTER TABLE sens_announcements ADD COLUMN parse_method TEXT DEFAULT ''"),
+                ("parse_status", "ALTER TABLE sens_announcements ADD COLUMN parse_status TEXT DEFAULT 'pending'"),
+                ("parsed_at", "ALTER TABLE sens_announcements ADD COLUMN parsed_at TIMESTAMP"),
+            ]
+            
+            for column_name, migration_sql in sens_migrations:
+                if column_name not in sens_columns:
+                    logger.info(f"Running migration: Adding column {column_name} to sens_announcements")
+                    cursor.execute(migration_sql)
+            
+            # Check if new columns exist in companies table
+            cursor.execute("PRAGMA table_info(companies)")
+            company_columns = [row[1] for row in cursor.fetchall()]
+            
+            company_migrations = [
+                ("send_telegram", "ALTER TABLE companies ADD COLUMN send_telegram BOOLEAN DEFAULT 0"),
+            ]
+            
+            for column_name, migration_sql in company_migrations:
+                if column_name not in company_columns:
+                    logger.info(f"Running migration: Adding column {column_name} to companies")
+                    cursor.execute(migration_sql)
+                    
+        except Exception as e:
+            logger.error(f"Migration error: {e}")
+    
     # ============================================================================
     # COMPANY OPERATIONS
     # ============================================================================
@@ -164,9 +214,9 @@ class DatabaseManager:
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO companies (name, jse_code, notes)
-                VALUES (?, ?, ?)
-            """, (company.name, company.jse_code, company.notes))
+                INSERT INTO companies (name, jse_code, send_telegram, notes)
+                VALUES (?, ?, ?, ?)
+            """, (company.name, company.jse_code, company.send_telegram, company.notes))
             company_id = cursor.lastrowid
             logger.info(f"Added company {company.name} ({company.jse_code}) to watchlist")
             return company_id
@@ -189,6 +239,7 @@ class DatabaseManager:
                 jse_code=row['jse_code'],
                 added_date=datetime.fromisoformat(row['added_date']) if row['added_date'] else None,
                 active_status=bool(row['active_status']),
+                send_telegram=bool(row['send_telegram']) if 'send_telegram' in row.keys() else False,
                 notes=row['notes']
             ) for row in rows]
     
@@ -206,23 +257,91 @@ class DatabaseManager:
                     jse_code=row['jse_code'],
                     added_date=datetime.fromisoformat(row['added_date']) if row['added_date'] else None,
                     active_status=bool(row['active_status']),
+                    send_telegram=bool(row['send_telegram']) if 'send_telegram' in row.keys() else False,
                     notes=row['notes']
                 )
             return None
     
     def is_company_on_watchlist(self, company_name: str) -> bool:
-        """Check if a company is on the watchlist (fuzzy match on name)."""
+        """Check if a company is on the watchlist (fuzzy bidirectional match on name)."""
         with self.get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT COUNT(*) as count FROM companies 
                 WHERE active_status = TRUE AND (
                     LOWER(name) LIKE LOWER(?) OR 
-                    LOWER(jse_code) LIKE LOWER(?)
+                    LOWER(jse_code) LIKE LOWER(?) OR
+                    LOWER(?) LIKE LOWER('%' || name || '%') OR
+                    LOWER(?) LIKE LOWER('%' || jse_code || '%')
                 )
-            """, (f"%{company_name}%", f"%{company_name}%"))
+            """, (f"%{company_name}%", f"%{company_name}%", company_name, company_name))
             result = cursor.fetchone()
             return result['count'] > 0
+    
+    def should_send_telegram_for_company(self, company_name: str) -> bool:
+        """Check if a company is flagged for Telegram notifications."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) as count FROM companies 
+                WHERE active_status = TRUE AND send_telegram = TRUE AND (
+                    LOWER(name) LIKE LOWER(?) OR 
+                    LOWER(jse_code) LIKE LOWER(?) OR
+                    LOWER(?) LIKE LOWER('%' || name || '%') OR
+                    LOWER(?) LIKE LOWER('%' || jse_code || '%')
+                )
+            """, (f"%{company_name}%", f"%{company_name}%", company_name, company_name))
+            result = cursor.fetchone()
+            return result['count'] > 0
+    
+    def update_company_telegram_flag(self, jse_code: str, send_telegram: bool) -> bool:
+        """Update the Telegram notification flag for a company."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE companies 
+                SET send_telegram = ? 
+                WHERE jse_code = ?
+            """, (send_telegram, jse_code))
+            
+            if cursor.rowcount > 0:
+                logger.info(f"Updated Telegram flag for {jse_code}: {send_telegram}")
+                return True
+            else:
+                logger.warning(f"No company found with JSE code: {jse_code}")
+                return False
+    
+    def update_sens_parsing(self, announcement: SensAnnouncement) -> bool:
+        """Update SENS announcement with parsed content and summary."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE sens_announcements 
+                SET pdf_content = ?, ai_summary = ?, parse_method = ?, 
+                    parse_status = ?, parsed_at = ?
+                WHERE sens_number = ?
+            """, (
+                announcement.pdf_content,
+                announcement.ai_summary,
+                announcement.parse_method,
+                announcement.parse_status,
+                announcement.parsed_at.isoformat() if announcement.parsed_at else None,
+                announcement.sens_number
+            ))
+            return cursor.rowcount > 0
+    
+    def get_unparsed_sens(self) -> List[SensAnnouncement]:
+        """Get SENS announcements that haven't been parsed yet."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM sens_announcements 
+                WHERE parse_status = 'pending' AND local_pdf_path != ''
+                ORDER BY date_published DESC
+                LIMIT 10
+            """)
+            rows = cursor.fetchall()
+            return [self._row_to_sens_announcement(row) for row in rows]
     
     def deactivate_company(self, jse_code: str) -> bool:
         """Deactivate a company from the watchlist."""
@@ -262,6 +381,8 @@ class DatabaseManager:
                 announcement.urgent_reason
             ))
             announcement_id = cursor.lastrowid
+            # Propagate generated id back to the in-memory object for downstream logging/notifications
+            announcement.id = announcement_id
             logger.info(f"Added SENS announcement {announcement.sens_number} for {announcement.company_name}")
             return announcement_id
     
@@ -280,7 +401,7 @@ class DatabaseManager:
             cursor.execute("""
                 SELECT * FROM sens_announcements 
                 WHERE processed = FALSE 
-                ORDER BY date_scraped DESC
+                ORDER BY date_published DESC, date_scraped DESC
             """)
             rows = cursor.fetchall()
             
@@ -323,7 +444,12 @@ class DatabaseManager:
             date_scraped=datetime.fromisoformat(row['date_scraped']) if row['date_scraped'] else None,
             processed=bool(row['processed']),
             is_urgent=bool(row['is_urgent']),
-            urgent_reason=row['urgent_reason']
+            urgent_reason=row['urgent_reason'],
+            pdf_content=row['pdf_content'] if 'pdf_content' in row.keys() else '',
+            ai_summary=row['ai_summary'] if 'ai_summary' in row.keys() else '',
+            parse_method=row['parse_method'] if 'parse_method' in row.keys() else '',
+            parse_status=row['parse_status'] if 'parse_status' in row.keys() else 'pending',
+            parsed_at=datetime.fromisoformat(row['parsed_at']) if ('parsed_at' in row.keys() and row['parsed_at']) else None
         )
     
     # ============================================================================
@@ -419,3 +545,62 @@ class DatabaseManager:
             }
             
             return stats
+    
+    def get_all_sens_announcements(self) -> List[SensAnnouncement]:
+        """Get all SENS announcements from database, ordered by publication date (newest first)."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT 
+                    id, sens_number, company_name, title, pdf_url, 
+                    local_pdf_path, dropbox_pdf_path, date_published, 
+                    date_scraped, processed, is_urgent, urgent_reason,
+                    pdf_content, ai_summary, parse_method, parse_status, parsed_at
+                FROM sens_announcements 
+                ORDER BY 
+                    CASE WHEN date_published IS NOT NULL THEN date_published ELSE date_scraped END DESC
+            """)
+            rows = cursor.fetchall()
+            
+            announcements = []
+            for row in rows:
+                try:
+                    announcement = SensAnnouncement(
+                        id=row['id'],
+                        sens_number=row['sens_number'],
+                        company_name=row['company_name'],
+                        title=row['title'],
+                        date_published=datetime.fromisoformat(row['date_published']) if row['date_published'] else None,
+                        pdf_url=row['pdf_url'],
+                        local_pdf_path=row['local_pdf_path'] or '',
+                        dropbox_pdf_path=row['dropbox_pdf_path'] or '',
+                        date_scraped=datetime.fromisoformat(row['date_scraped']) if row['date_scraped'] else None,
+                        processed=bool(row['processed']),
+                        is_urgent=bool(row['is_urgent']),
+                        urgent_reason=row['urgent_reason'] or '',
+                        pdf_content=row['pdf_content'] or '',
+                        ai_summary=row['ai_summary'] or '',
+                        parse_method=row['parse_method'] or '',
+                        parse_status=row['parse_status'] or 'pending',
+                        parsed_at=datetime.fromisoformat(row['parsed_at']) if row['parsed_at'] else None
+                    )
+                    announcements.append(announcement)
+                except Exception as e:
+                    logger.error(f"Error converting row to SensAnnouncement: {e}")
+                    continue
+            
+            return announcements
+    
+    def get_sens_by_number(self, sens_number: str) -> Optional[SensAnnouncement]:
+        """Get a SENS announcement by its number."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM sens_announcements 
+                WHERE sens_number = ?
+            """, (sens_number,))
+            row = cursor.fetchone()
+            
+            if row:
+                return self._row_to_sens_announcement(row)
+            return None

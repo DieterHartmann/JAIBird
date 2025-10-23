@@ -32,9 +32,29 @@ class DropboxManager:
         self._initialize_client()
     
     def _initialize_client(self):
-        """Initialize Dropbox client with authentication."""
+        """Initialize Dropbox client with authentication and auto-refresh."""
         try:
-            self.dbx = dropbox.Dropbox(self.config.dropbox_access_token)
+            # Check if we have refresh token setup
+            has_refresh_token = (hasattr(self.config, 'dropbox_refresh_token') and 
+                               self.config.dropbox_refresh_token and
+                               hasattr(self.config, 'dropbox_app_key') and 
+                               self.config.dropbox_app_key and
+                               hasattr(self.config, 'dropbox_app_secret') and 
+                               self.config.dropbox_app_secret)
+            
+            if has_refresh_token:
+                # Use OAuth2 flow with refresh token
+                self.dbx = dropbox.Dropbox(
+                    oauth2_access_token=self.config.dropbox_access_token,
+                    oauth2_refresh_token=self.config.dropbox_refresh_token,
+                    app_key=self.config.dropbox_app_key,
+                    app_secret=self.config.dropbox_app_secret
+                )
+                logger.info("Initialized Dropbox client with refresh token support")
+            else:
+                # Fallback to simple access token (will need manual refresh)
+                self.dbx = dropbox.Dropbox(self.config.dropbox_access_token)
+                logger.info("Initialized Dropbox client with access token only")
             
             # Test the connection
             account_info = self.dbx.users_get_current_account()
@@ -42,6 +62,7 @@ class DropboxManager:
             
         except AuthError as e:
             logger.error(f"Dropbox authentication failed: {e}")
+            logger.warning("Token may have expired. Please refresh your Dropbox access token.")
             raise DropboxManagerError(f"Authentication failed: {e}")
         except Exception as e:
             logger.error(f"Failed to initialize Dropbox client: {e}")
@@ -50,19 +71,17 @@ class DropboxManager:
     def _ensure_folder_exists(self, folder_path: str):
         """Ensure a folder exists in Dropbox, create if it doesn't."""
         try:
-            self.dbx.files_get_metadata(folder_path)
-            logger.debug(f"Dropbox folder exists: {folder_path}")
+            # Try to create the folder - if it exists, Dropbox will return an error we can ignore
+            self.dbx.files_create_folder_v2(folder_path)
+            logger.info(f"Created Dropbox folder: {folder_path}")
         except ApiError as e:
-            if e.error.is_path_not_found():
-                try:
-                    self.dbx.files_create_folder_v2(folder_path)
-                    logger.info(f"Created Dropbox folder: {folder_path}")
-                except ApiError as create_error:
-                    logger.error(f"Failed to create Dropbox folder {folder_path}: {create_error}")
-                    raise DropboxManagerError(f"Could not create folder: {create_error}")
+            if e.error.is_path() and e.error.get_path().is_conflict():
+                # Folder already exists - this is fine
+                logger.debug(f"Dropbox folder already exists: {folder_path}")
             else:
-                logger.error(f"Error checking Dropbox folder {folder_path}: {e}")
-                raise DropboxManagerError(f"Folder check failed: {e}")
+                logger.error(f"Failed to create Dropbox folder {folder_path}: {e}")
+                # Don't raise error - try to upload anyway
+                logger.warning(f"Continuing upload despite folder creation issue")
     
     def upload_pdf(self, local_path: str, sens_number: str, company_name: str) -> Optional[str]:
         """
@@ -104,7 +123,12 @@ class DropboxManager:
                 logger.info(f"File already exists in Dropbox: {dropbox_path}")
                 return dropbox_path
             except ApiError as e:
-                if not e.error.is_path_not_found():
+                # File doesn't exist, which is fine - we'll upload it
+                if hasattr(e.error, 'is_path_not_found') and e.error.is_path_not_found():
+                    pass  # File doesn't exist, continue with upload
+                elif 'path_not_found' in str(e).lower() or 'not_found' in str(e).lower():
+                    pass  # File doesn't exist, continue with upload
+                else:
                     logger.error(f"Error checking existing file: {e}")
                     return None
             

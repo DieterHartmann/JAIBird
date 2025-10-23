@@ -2,6 +2,21 @@
 
 🚀 **JAIBird** is an intelligent stock market monitoring platform focused on automated SENS (Stock Exchange News Service) announcement tracking and notification delivery for the Johannesburg Stock Exchange (JSE).
 
+## 🐍 **Environment Setup**
+
+**IMPORTANT**: JAIBird requires a dedicated Python environment to avoid package conflicts. Use the clean requirements file for setup:
+
+```bash
+# Create dedicated environment
+conda create -n jaibird python=3.11
+conda activate jaibird
+
+# Install from clean requirements (avoids pandas/numpy conflicts)
+pip install -r requirements_clean.txt
+```
+
+This prevents binary compatibility issues with pandas/numpy that can occur in shared environments.
+
 ## Features
 
 - **Automated SENS Scraping**: Continuously monitors JSE SENS announcements
