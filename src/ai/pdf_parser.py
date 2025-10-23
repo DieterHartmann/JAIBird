@@ -249,6 +249,49 @@ class PDFParser:
         
         return "good"
     
+    def _extract_with_pypdf(self, pdf_path: str) -> str:
+        """
+        Extract text using PyPDF2 and pdfplumber as fallback.
+        
+        Args:
+            pdf_path: Path to PDF file
+            
+        Returns:
+            Extracted text or empty string if failed
+        """
+        try:
+            # Try pdfplumber first (better text extraction)
+            import pdfplumber
+            with pdfplumber.open(pdf_path) as pdf:
+                text = ""
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+                
+                if text.strip():
+                    logger.debug(f"pdfplumber extracted {len(text)} characters")
+                    return text.strip()
+        except Exception as e:
+            logger.debug(f"pdfplumber failed: {e}")
+        
+        try:
+            # Fallback to PyPDF2
+            import PyPDF2
+            with open(pdf_path, 'rb') as file:
+                reader = PyPDF2.PdfReader(file)
+                text = ""
+                for page in reader.pages:
+                    text += page.extract_text() + "\n"
+                
+                if text.strip():
+                    logger.debug(f"PyPDF2 extracted {len(text)} characters")
+                    return text.strip()
+        except Exception as e:
+            logger.debug(f"PyPDF2 failed: {e}")
+        
+        return ""
+    
     def _extract_with_ai(self, pdf_path: str, ocr_text: str) -> str:
         """
         Extract and clean text using AI when OCR fails.
@@ -265,8 +308,17 @@ class PDFParser:
             return ocr_text  # Return OCR text as fallback
         
         try:
-            # For now, we'll improve the OCR text using AI
-            # In future, could implement direct PDF parsing via AI
+            # If OCR failed completely, extract text using PyPDF2/pdfplumber first
+            if not ocr_text or len(ocr_text.strip()) < 50:
+                logger.info("OCR failed, extracting text with PyPDF2/pdfplumber for AI processing")
+                extracted_text = self._extract_with_pypdf(pdf_path)
+                if extracted_text:
+                    ocr_text = extracted_text
+                    logger.info(f"Extracted {len(extracted_text)} characters with PyPDF2/pdfplumber")
+                else:
+                    logger.warning("Both OCR and PyPDF2/pdfplumber failed to extract text")
+                    return ""
+            
             prompt = self._create_parsing_prompt(ocr_text)
             
             if self.config.pdf_parse_provider == "openai":
