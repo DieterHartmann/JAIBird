@@ -609,71 +609,58 @@ class DatabaseManager:
     # EXECUTIVE DASHBOARD HELPERS
     # ============================================================================
 
-    def get_watchlist_sens(self, days: int = 30) -> List[SensAnnouncement]:
-        """Get SENS announcements for watchlist companies in the last N days."""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            # Use fuzzy matching similar to is_company_on_watchlist
-            cursor.execute("""
-                SELECT s.* FROM sens_announcements s
-                INNER JOIN companies c ON c.active_status = TRUE AND (
-                    LOWER(s.company_name) LIKE LOWER('%' || c.name || '%') OR
-                    LOWER(s.company_name) LIKE LOWER('%' || c.jse_code || '%') OR
-                    LOWER(c.name) LIKE LOWER('%' || s.company_name || '%')
-                )
-                WHERE s.date_published >= datetime('now', '-{} days')
-                ORDER BY s.date_published DESC
-            """.format(days))
-            rows = cursor.fetchall()
-            return [self._row_to_sens_announcement(row) for row in rows]
-
     def get_watchlist_summaries(self) -> List[Dict[str, Any]]:
-        """Get the latest AI summary for each watchlist company."""
-        with self.get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT c.name, c.jse_code, s.title, s.ai_summary,
-                       s.date_published, s.sens_number, s.is_urgent
-                FROM companies c
-                LEFT JOIN sens_announcements s ON (
-                    LOWER(s.company_name) LIKE LOWER('%' || c.name || '%') OR
-                    LOWER(s.company_name) LIKE LOWER('%' || c.jse_code || '%') OR
-                    LOWER(c.name) LIKE LOWER('%' || s.company_name || '%')
-                )
-                WHERE c.active_status = TRUE
-                  AND s.ai_summary IS NOT NULL AND s.ai_summary != ''
-                  AND s.id = (
-                      SELECT s2.id FROM sens_announcements s2
-                      WHERE (
-                          LOWER(s2.company_name) LIKE LOWER('%' || c.name || '%') OR
-                          LOWER(s2.company_name) LIKE LOWER('%' || c.jse_code || '%') OR
-                          LOWER(c.name) LIKE LOWER('%' || s2.company_name || '%')
-                      )
-                      AND s2.ai_summary IS NOT NULL AND s2.ai_summary != ''
-                      ORDER BY s2.date_published DESC
-                      LIMIT 1
-                  )
-                ORDER BY s.date_published DESC
-            """)
-            rows = cursor.fetchall()
-            return [{
-                'company_name': row['name'],
-                'jse_code': row['jse_code'],
-                'title': row['title'],
-                'ai_summary': row['ai_summary'],
-                'date_published': row['date_published'],
-                'sens_number': row['sens_number'],
-                'is_urgent': bool(row['is_urgent']),
-            } for row in rows]
+        """
+        Get the latest AI summary for each watchlist company.
+        Uses a simple iterative approach to avoid expensive LIKE joins.
+        """
+        companies = self.get_all_companies(active_only=True)
+        if not companies:
+            return []
 
-    def get_today_sens(self) -> List[SensAnnouncement]:
-        """Get all SENS announcements from today."""
+        results = []
         with self.get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM sens_announcements
-                WHERE date(date_published) = date('now')
-                ORDER BY date_published DESC
-            """)
-            rows = cursor.fetchall()
-            return [self._row_to_sens_announcement(row) for row in rows]
+            for company in companies:
+                # Simple targeted query per company — fast with index
+                cursor.execute("""
+                    SELECT title, ai_summary, date_published, sens_number, is_urgent
+                    FROM sens_announcements
+                    WHERE ai_summary IS NOT NULL AND ai_summary != ''
+                      AND (LOWER(company_name) LIKE LOWER(?) OR LOWER(company_name) LIKE LOWER(?))
+                    ORDER BY date_published DESC
+                    LIMIT 1
+                """, (f"%{company.name}%", f"%{company.jse_code}%"))
+                row = cursor.fetchone()
+                if row:
+                    results.append({
+                        'company_name': company.name,
+                        'jse_code': company.jse_code,
+                        'title': row['title'],
+                        'ai_summary': row['ai_summary'],
+                        'date_published': row['date_published'],
+                        'sens_number': row['sens_number'],
+                        'is_urgent': bool(row['is_urgent']),
+                    })
+        return results
+
+    def get_sens_summaries_lightweight(self, days: Optional[int] = None) -> List[Dict[str, str]]:
+        """
+        Get only company_name + ai_summary for sentiment analysis.
+        Avoids loading heavy pdf_content into memory.
+        """
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            if days:
+                cursor.execute("""
+                    SELECT company_name, ai_summary FROM sens_announcements
+                    WHERE ai_summary IS NOT NULL AND ai_summary != ''
+                      AND date_published >= datetime('now', '-{} days')
+                """.format(int(days)))
+            else:
+                cursor.execute("""
+                    SELECT company_name, ai_summary FROM sens_announcements
+                    WHERE ai_summary IS NOT NULL AND ai_summary != ''
+                """)
+            return [{'company_name': row['company_name'], 'ai_summary': row['ai_summary']}
+                    for row in cursor.fetchall()]

@@ -442,72 +442,39 @@ def create_app():
     def api_dashboard_full():
         """
         Single endpoint returning all dashboard data in one call.
-        Avoids multiple round-trips from the frontend.
+        Each section is independently try/excepted so a single failure
+        doesn't take down the whole dashboard.
         """
+        def _safe(label, fn, default=None):
+            """Run fn, returning default on error."""
+            try:
+                return fn()
+            except Exception as e:
+                logger.error(f"Dashboard section '{label}' failed: {e}")
+                return default if default is not None else {}
+
+        def _serialize_dates(items, key='date_published'):
+            """In-place convert datetime objects to ISO strings."""
+            for item in items:
+                if item.get(key) and hasattr(item[key], 'isoformat'):
+                    item[key] = item[key].isoformat()
+            return items
+
         try:
             days = request.args.get('days', None, type=int)
             categorised = _get_categorised_sens(days)
 
-            # Also get recent 7-day set for highlights
-            if days and days > 7:
-                recent_categorised = _get_categorised_sens(7)
-            else:
-                recent_categorised = categorised
+            # Recent 7-day set for highlights
+            recent_categorised = _get_categorised_sens(7) if (days and days > 7) else categorised
 
-            # Volume over time – last 30 days by day
-            vol_categorised = _get_categorised_sens(30)
+            # Volume – last 30 days
+            vol_categorised = _get_categorised_sens(30) if (days is None or days > 30) else categorised
 
+            # --- Phase 1 core (these are all fast, pure-Python) ---
             noise = get_noise_summary(categorised)
-            highlights = get_recent_strategic_highlights(recent_categorised, n=8)
-
-            # Serialize datetimes in highlights
-            for item in highlights:
-                if item.get('date_published'):
-                    item['date_published'] = item['date_published'].isoformat()
-
-            # --- Phase 2: Today's ticker ---
-            today_items = get_today_strategic(categorised)
-            for item in today_items:
-                if item.get('date_published'):
-                    item['date_published'] = item['date_published'].isoformat()
-
-            # --- Phase 2: Director dealing signal ---
-            director_signal = get_director_dealing_signal(categorised)
-            for lst_key in ('recent_buys', 'recent_sells'):
-                for item in director_signal.get(lst_key, []):
-                    if item.get('date_published'):
-                        item['date_published'] = item['date_published'].isoformat()
-
-            # --- Phase 2: Unusual activity alerts ---
-            unusual_alerts = get_unusual_activity_alerts(categorised)
-
-            # --- Phase 2: Watchlist pulse ---
-            watchlist_companies = db_manager.get_all_companies(active_only=True)
-            wl_names = [c.name for c in watchlist_companies]
-            watchlist_pulse = get_watchlist_pulse(categorised, wl_names)
-
-            # --- Phase 2: Sentiment summary (from announcements with AI summaries) ---
-            all_sens = db_manager.get_all_sens_announcements() if not days else db_manager.get_recent_sens(days=days)
-            sens_with_summaries = [
-                {"company_name": s.company_name, "ai_summary": s.ai_summary}
-                for s in all_sens if s.ai_summary
-            ]
-            sentiment = get_sentiment_summary(sens_with_summaries)
-
-            # --- Phase 2: Watchlist PDF summary cards ---
-            watchlist_summaries = db_manager.get_watchlist_summaries()
-
-            # --- Phase 2: Upcoming events / calendar ---
-            events = get_upcoming_events(categorised)
-            for item in events:
-                if item.get('date'):
-                    item['date'] = item['date'].isoformat()
-
-            # --- Phase 2: Sector breakdown ---
-            sector_data = get_sector_breakdown(categorised, exclude_noise=True)
+            highlights = _serialize_dates(get_recent_strategic_highlights(recent_categorised, n=8))
 
             result = {
-                # Phase 1
                 'top_companies': get_top_companies(categorised, n=10, exclude_noise=False),
                 'top_companies_strategic': get_top_companies(categorised, n=10, exclude_noise=True),
                 'category_breakdown': get_category_breakdown(categorised, exclude_noise=True),
@@ -517,17 +484,50 @@ def create_app():
                 'volume_by_week': get_volume_over_time(categorised, bucket='week'),
                 'urgency': get_urgency_breakdown(categorised),
                 'strategic_highlights': highlights,
-                'company_heatmap': get_company_activity_heatmap(categorised, top_n=10),
-                # Phase 2
-                'today_strategic': today_items,
-                'director_signal': director_signal,
-                'unusual_alerts': unusual_alerts,
-                'watchlist_pulse': watchlist_pulse,
-                'sentiment': sentiment,
-                'watchlist_summaries': watchlist_summaries,
-                'upcoming_events': events,
-                'sector_breakdown': sector_data,
+                'company_heatmap': _safe('heatmap', lambda: get_company_activity_heatmap(categorised, top_n=10)),
             }
+
+            # --- Phase 2: Each section independently protected ---
+
+            # Today ticker
+            result['today_strategic'] = _safe('today', lambda: _serialize_dates(
+                get_today_strategic(categorised)), [])
+
+            # Director dealing signal
+            def _director():
+                ds = get_director_dealing_signal(categorised)
+                for k in ('recent_buys', 'recent_sells'):
+                    _serialize_dates(ds.get(k, []))
+                return ds
+            result['director_signal'] = _safe('director_signal', _director)
+
+            # Unusual activity
+            result['unusual_alerts'] = _safe('unusual_alerts', lambda:
+                get_unusual_activity_alerts(categorised), [])
+
+            # Watchlist pulse
+            def _pulse():
+                wl = db_manager.get_all_companies(active_only=True)
+                return get_watchlist_pulse(categorised, [c.name for c in wl])
+            result['watchlist_pulse'] = _safe('watchlist_pulse', _pulse)
+
+            # Sentiment (lightweight query — no pdf_content loaded)
+            def _sentiment():
+                summaries = db_manager.get_sens_summaries_lightweight(days=days)
+                return get_sentiment_summary(summaries)
+            result['sentiment'] = _safe('sentiment', _sentiment)
+
+            # Watchlist summary cards
+            result['watchlist_summaries'] = _safe('watchlist_summaries', lambda:
+                db_manager.get_watchlist_summaries(), [])
+
+            # Events / calendar
+            result['upcoming_events'] = _safe('events', lambda:
+                _serialize_dates(get_upcoming_events(categorised), key='date'), [])
+
+            # Sector breakdown
+            result['sector_breakdown'] = _safe('sectors', lambda:
+                get_sector_breakdown(categorised, exclude_noise=True), [])
 
             return jsonify({'status': 'success', 'data': result})
         except Exception as e:

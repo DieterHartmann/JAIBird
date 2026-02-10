@@ -78,40 +78,33 @@ async function fetchDashboardData() {
 
 function renderAll() {
     if (!dashData) return;
-    updateKPIs();
-    renderTodayTicker();
-    renderTopCompanies();
-    renderCategories();
-    renderVolume();
-    renderNoiseDoughnut();
-    renderSectorChart();
-    renderHighlights();
-    renderHeatmap();
-    renderDirectorSignal();
-    renderUnusualAlerts();
-    renderWatchlistPulse();
-    renderSentiment();
-    renderSummaryCards();
-    renderEvents();
+    // Each widget is independently try/caught so one failure doesn't break the rest
+    const widgets = [
+        updateKPIs, renderTodayTicker, renderTopCompanies, renderCategories,
+        renderVolume, renderNoiseDoughnut, renderSectorChart, renderHighlights,
+        renderHeatmap, renderDirectorSignal, renderUnusualAlerts,
+        renderWatchlistPulse, renderSentiment, renderSummaryCards, renderEvents,
+    ];
+    widgets.forEach(fn => { try { fn(); } catch(e) { console.warn('Widget render error:', fn.name, e); } });
 }
 
 // ---------------------------------------------------------------------------
 // KPI Cards
 // ---------------------------------------------------------------------------
 function updateKPIs() {
-    const ns = dashData.noise_summary;
-    setT('kpiTotal', ns.total);
-    setT('kpiStrategic', ns.strategic);
-    setT('kpiStrategicPct', `${(100 - ns.noise_pct).toFixed(0)}% of total`);
-    setT('kpiNoise', ns.noise);
-    setT('kpiNoisePct', `${ns.noise_pct}% of total`);
-    setT('kpiUrgent', dashData.urgency.urgent);
+    const ns = dashData.noise_summary || {};
+    setT('kpiTotal', ns.total || 0);
+    setT('kpiStrategic', ns.strategic || 0);
+    setT('kpiStrategicPct', ns.noise_pct != null ? `${(100 - ns.noise_pct).toFixed(0)}% of total` : '');
+    setT('kpiNoise', ns.noise || 0);
+    setT('kpiNoisePct', ns.noise_pct != null ? `${ns.noise_pct}% of total` : '');
+    setT('kpiUrgent', (dashData.urgency || {}).urgent || 0);
 
     // Sentiment KPI
     const sent = dashData.sentiment || {};
     const sentScore = sent.overall_score || 0;
     const sentLabel = sent.overall_label || 'N/A';
-    setT('kpiSentiment', sentScore > 0 ? `+${sentScore}` : sentScore);
+    setT('kpiSentiment', sentScore > 0 ? `+${sentScore}` : String(sentScore));
     const sentEl = document.getElementById('kpiSentimentLabel');
     if (sentEl) {
         sentEl.textContent = sentLabel;
