@@ -7,6 +7,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     tesseract-ocr-eng \
     poppler-utils \
+    gcc \
+    python3-dev \
     libglib2.0-0 \
     libnss3 \
     libfontconfig1 \
