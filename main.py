@@ -70,13 +70,7 @@ class JAIBirdScheduler:
                     parsed_announcement = parse_sens_announcement(announcement)
                     if parsed_announcement.ai_summary:
                         # Update the database with parsed content
-                        self.db_manager.update_sens_parsing(
-                            announcement.sens_number,
-                            parsed_announcement.pdf_content,
-                            parsed_announcement.ai_summary,
-                            parsed_announcement.parse_method,
-                            parsed_announcement.parse_status
-                        )
+                        self.db_manager.update_sens_parsing(parsed_announcement)
                         logger.info(f"Generated AI summary for SENS {announcement.sens_number}")
                 except Exception as e:
                     logger.error(f"PDF parsing failed for SENS {announcement.sens_number}: {e}")
