@@ -206,6 +206,7 @@ def categorize_announcements(announcements) -> List[Dict[str, Any]]:
             "is_urgent": getattr(ann, "is_urgent", False),
             "category": cat,
             "is_noise": noise,
+            "ai_summary": getattr(ann, "ai_summary", None) or "",
         })
     return results
 

@@ -440,8 +440,12 @@ function renderHighlights() {
 
     tbody.innerHTML = data.map(item => {
         const dt = item.date_published ? new Date(item.date_published).toLocaleDateString('en-ZA', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '—';
-        return `<tr><td><strong class="small">${esc(item.company_name)}</strong></td><td class="small">${esc(item.title)}</td><td><span class="badge ${badge(item.category)} small">${esc(item.category)}</span></td><td class="small text-muted text-nowrap">${dt}</td></tr>`;
+        const summary = item.ai_summary ? esc(item.ai_summary) : 'No AI summary available';
+        return `<tr class="highlight-row" data-summary="${summary}"><td><strong class="small">${esc(item.company_name)}</strong></td><td class="small">${esc(item.title)}</td><td><span class="badge ${badge(item.category)} small">${esc(item.category)}</span></td><td class="small text-muted text-nowrap">${dt}</td></tr>`;
     }).join('');
+
+    // Attach tooltip behaviour
+    attachHighlightTooltips();
 }
 
 // ---------------------------------------------------------------------------
@@ -531,6 +535,46 @@ function renderHeatmap() {
         }).join('');
         return `<tr><td class="small fw-bold">${esc(trunc(co, 30))}</td>${cells}</tr>`;
     }).join('');
+}
+
+// ---------------------------------------------------------------------------
+// Strategic Highlights Tooltip
+// ---------------------------------------------------------------------------
+let _highlightTooltip = null;
+
+function attachHighlightTooltips() {
+    if (!_highlightTooltip) {
+        _highlightTooltip = document.createElement('div');
+        _highlightTooltip.className = 'highlight-tooltip';
+        document.body.appendChild(_highlightTooltip);
+    }
+
+    document.querySelectorAll('.highlight-row').forEach(row => {
+        row.addEventListener('mouseenter', (e) => {
+            const summary = row.getAttribute('data-summary');
+            if (!summary) return;
+            _highlightTooltip.innerHTML = summary;
+            _highlightTooltip.style.display = 'block';
+            positionTooltip(e);
+        });
+        row.addEventListener('mousemove', positionTooltip);
+        row.addEventListener('mouseleave', () => {
+            _highlightTooltip.style.display = 'none';
+        });
+    });
+}
+
+function positionTooltip(e) {
+    if (!_highlightTooltip) return;
+    const pad = 12;
+    const tipW = _highlightTooltip.offsetWidth;
+    const tipH = _highlightTooltip.offsetHeight;
+    let x = e.clientX + pad;
+    let y = e.clientY + pad;
+    if (x + tipW > window.innerWidth - pad) x = e.clientX - tipW - pad;
+    if (y + tipH > window.innerHeight - pad) y = e.clientY - tipH - pad;
+    _highlightTooltip.style.left = x + 'px';
+    _highlightTooltip.style.top = y + 'px';
 }
 
 // ---------------------------------------------------------------------------
