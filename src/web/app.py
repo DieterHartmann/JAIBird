@@ -5,6 +5,7 @@ Provides web interface for managing watchlist and viewing SENS announcements.
 
 import logging
 from datetime import datetime
+from typing import Optional
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_wtf import FlaskForm
 from wtforms import StringField, TextAreaField, BooleanField, SubmitField
@@ -15,6 +16,17 @@ from ..utils.config import get_config
 from ..notifications.notifier import NotificationManager
 from ..scrapers.sens_scraper import SensScraper
 from ..utils.dropbox_manager import DropboxManager
+from ..analytics.sens_categorizer import (
+    categorize_announcements,
+    get_top_companies,
+    get_category_breakdown,
+    get_noise_summary,
+    get_volume_over_time,
+    get_urgency_breakdown,
+    get_recent_strategic_highlights,
+    get_company_activity_heatmap,
+    get_all_categories,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -303,6 +315,165 @@ def create_app():
                 'error': str(e)
             }), 500
     
+    # ====================================================================
+    # EXECUTIVE DASHBOARD API ENDPOINTS
+    # ====================================================================
+
+    def _get_categorised_sens(days: Optional[int] = None):
+        """Helper: fetch and categorise SENS announcements."""
+        if days:
+            announcements = db_manager.get_recent_sens(days=days)
+        else:
+            announcements = db_manager.get_all_sens_announcements()
+        return categorize_announcements(announcements)
+
+    @app.route('/api/dashboard/top_companies')
+    def api_dashboard_top_companies():
+        """Top N companies by SENS announcement volume."""
+        try:
+            n = request.args.get('n', 10, type=int)
+            days = request.args.get('days', None, type=int)
+            exclude_noise = request.args.get('exclude_noise', 'false').lower() == 'true'
+            categorised = _get_categorised_sens(days)
+            data = get_top_companies(categorised, n=n, exclude_noise=exclude_noise)
+            return jsonify({'status': 'success', 'data': data})
+        except Exception as e:
+            logger.error(f"Dashboard top_companies error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/dashboard/category_breakdown')
+    def api_dashboard_category_breakdown():
+        """SENS announcements grouped by thematic category."""
+        try:
+            days = request.args.get('days', None, type=int)
+            exclude_noise = request.args.get('exclude_noise', 'true').lower() == 'true'
+            categorised = _get_categorised_sens(days)
+            data = get_category_breakdown(categorised, exclude_noise=exclude_noise)
+            return jsonify({'status': 'success', 'data': data})
+        except Exception as e:
+            logger.error(f"Dashboard category_breakdown error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/dashboard/noise_summary')
+    def api_dashboard_noise_summary():
+        """Strategic vs noise announcement split."""
+        try:
+            days = request.args.get('days', None, type=int)
+            categorised = _get_categorised_sens(days)
+            data = get_noise_summary(categorised)
+            return jsonify({'status': 'success', 'data': data})
+        except Exception as e:
+            logger.error(f"Dashboard noise_summary error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/dashboard/volume_over_time')
+    def api_dashboard_volume_over_time():
+        """SENS volume bucketed by day/week/month."""
+        try:
+            bucket = request.args.get('bucket', 'day')
+            days = request.args.get('days', 30, type=int)
+            exclude_noise = request.args.get('exclude_noise', 'false').lower() == 'true'
+            categorised = _get_categorised_sens(days)
+            data = get_volume_over_time(categorised, bucket=bucket, exclude_noise=exclude_noise)
+            return jsonify({'status': 'success', 'data': data})
+        except Exception as e:
+            logger.error(f"Dashboard volume_over_time error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/dashboard/urgency')
+    def api_dashboard_urgency():
+        """Urgent vs normal announcement breakdown."""
+        try:
+            days = request.args.get('days', None, type=int)
+            categorised = _get_categorised_sens(days)
+            data = get_urgency_breakdown(categorised)
+            return jsonify({'status': 'success', 'data': data})
+        except Exception as e:
+            logger.error(f"Dashboard urgency error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/dashboard/strategic_highlights')
+    def api_dashboard_strategic_highlights():
+        """Most recent strategic (non-noise) announcements."""
+        try:
+            n = request.args.get('n', 8, type=int)
+            days = request.args.get('days', 7, type=int)
+            categorised = _get_categorised_sens(days)
+            data = get_recent_strategic_highlights(categorised, n=n)
+            # Serialize datetimes
+            for item in data:
+                if item.get('date_published'):
+                    item['date_published'] = item['date_published'].isoformat()
+            return jsonify({'status': 'success', 'data': data})
+        except Exception as e:
+            logger.error(f"Dashboard strategic_highlights error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/dashboard/company_heatmap')
+    def api_dashboard_company_heatmap():
+        """Category-by-company activity heatmap for top companies."""
+        try:
+            n = request.args.get('n', 10, type=int)
+            days = request.args.get('days', None, type=int)
+            categorised = _get_categorised_sens(days)
+            data = get_company_activity_heatmap(categorised, top_n=n)
+            return jsonify({'status': 'success', 'data': data})
+        except Exception as e:
+            logger.error(f"Dashboard company_heatmap error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/dashboard/categories')
+    def api_dashboard_categories():
+        """Return the full category taxonomy."""
+        try:
+            return jsonify({'status': 'success', 'data': get_all_categories()})
+        except Exception as e:
+            logger.error(f"Dashboard categories error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/dashboard/full')
+    def api_dashboard_full():
+        """
+        Single endpoint returning all dashboard data in one call.
+        Avoids multiple round-trips from the frontend.
+        """
+        try:
+            days = request.args.get('days', None, type=int)
+            categorised = _get_categorised_sens(days)
+
+            # Also get recent 7-day set for highlights
+            if days and days > 7:
+                recent_categorised = _get_categorised_sens(7)
+            else:
+                recent_categorised = categorised
+
+            # Volume over time – last 30 days by day
+            vol_categorised = _get_categorised_sens(30)
+
+            noise = get_noise_summary(categorised)
+            highlights = get_recent_strategic_highlights(recent_categorised, n=8)
+            for item in highlights:
+                if item.get('date_published'):
+                    item['date_published'] = item['date_published'].isoformat()
+
+            result = {
+                'top_companies': get_top_companies(categorised, n=10, exclude_noise=False),
+                'top_companies_strategic': get_top_companies(categorised, n=10, exclude_noise=True),
+                'category_breakdown': get_category_breakdown(categorised, exclude_noise=True),
+                'category_breakdown_all': get_category_breakdown(categorised, exclude_noise=False),
+                'noise_summary': noise,
+                'volume_by_day': get_volume_over_time(vol_categorised, bucket='day'),
+                'volume_by_week': get_volume_over_time(categorised, bucket='week'),
+                'urgency': get_urgency_breakdown(categorised),
+                'strategic_highlights': highlights,
+                'company_heatmap': get_company_activity_heatmap(categorised, top_n=10),
+            }
+
+            return jsonify({'status': 'success', 'data': result})
+        except Exception as e:
+            logger.error(f"Dashboard full error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
     # Error handlers
     @app.errorhandler(404)
     def not_found_error(error):

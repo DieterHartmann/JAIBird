@@ -1,232 +1,264 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard - JAIBird{% endblock %}
+{% block title %}Executive Dashboard - JAIBird{% endblock %}
 
 {% block content %}
-<div class="row">
-    <div class="col-12">
-        <h1 class="mb-4">
-            <i class="bi bi-speedometer2"></i> Dashboard
-            <small class="text-muted">Stock Market Intelligence</small>
-        </h1>
-    </div>
-</div>
-
-<!-- Statistics Cards -->
-<div class="row mb-4">
-    <div class="col-md-3">
-        <div class="card bg-primary text-white">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h4 class="card-title">{{ stats.get('sens_announcements', {}).get('total', 0) }}</h4>
-                        <p class="card-text">Total SENS</p>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="bi bi-file-earmark-text fs-1"></i>
-                    </div>
-                </div>
-            </div>
+<div class="row mb-3">
+    <div class="col-12 d-flex justify-content-between align-items-center">
+        <div>
+            <h1 class="mb-0">
+                <i class="bi bi-speedometer2"></i> Executive Dashboard
+            </h1>
+            <small class="text-muted">JSE SENS Intelligence &mdash; Updated live</small>
         </div>
-    </div>
-    
-    <div class="col-md-3">
-        <div class="card bg-success text-white">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h4 class="card-title">{{ stats.get('companies', {}).get('active', 0) }}</h4>
-                        <p class="card-text">Watchlist Companies</p>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="bi bi-star fs-1"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-md-3">
-        <div class="card bg-warning text-white">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h4 class="card-title">{{ stats.get('sens_announcements', {}).get('urgent', 0) }}</h4>
-                        <p class="card-text">Urgent Alerts</p>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="bi bi-exclamation-triangle fs-1"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-md-3">
-        <div class="card bg-info text-white">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h4 class="card-title">{{ stats.get('notifications', {}).get('sent', 0) }}</h4>
-                        <p class="card-text">Notifications Sent</p>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="bi bi-bell fs-1"></i>
-                    </div>
-                </div>
-            </div>
+        <div class="d-flex align-items-center gap-2">
+            <select id="dashDaysFilter" class="form-select form-select-sm" style="width: auto;">
+                <option value="">All Time</option>
+                <option value="7">Last 7 Days</option>
+                <option value="14">Last 14 Days</option>
+                <option value="30" selected>Last 30 Days</option>
+                <option value="90">Last 90 Days</option>
+            </select>
+            <button class="btn btn-sm btn-outline-primary" onclick="refreshDashboard()" title="Refresh">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
         </div>
     </div>
 </div>
 
-<div class="row">
-    <!-- Recent SENS Announcements -->
-    <div class="col-md-8">
-        <div class="card">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">
-                    <i class="bi bi-clock-history"></i> Recent SENS Announcements
-                </h5>
-                <a href="{{ url_for('sens_list') }}" class="btn btn-sm btn-outline-primary">View All</a>
-            </div>
-            <div class="card-body">
-                {% if recent_sens %}
-                    <div class="table-responsive">
-                        <table class="table table-hover">
-                            <thead class="table-light">
-                                <tr>
-                                    <th>SENS #</th>
-                                    <th>Company</th>
-                                    <th>Title</th>
-                                    <th>Date</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {% for sens in recent_sens %}
-                                <tr>
-                                    <td>
-                                        <code>{{ sens.sens_number }}</code>
-                                    </td>
-                                    <td>
-                                        <strong>{{ sens.company_name }}</strong>
-                                    </td>
-                                    <td>
-                                        <span class="text-truncate sens-title-hover" 
-                                              style="max-width: 200px; display: inline-block; cursor: help;" 
-                                              {% if sens.ai_summary %}
-                                              data-bs-toggle="tooltip" 
-                                              data-bs-placement="top" 
-                                              data-bs-html="true"
-                                              data-bs-title="<strong>AI Summary:</strong><br>{{ sens.ai_summary }}"
-                                              {% else %}
-                                              title="{{ sens.title }}"
-                                              {% endif %}>
-                                            {{ sens.title }}
-                                            {% if sens.ai_summary %}
-                                                <i class="bi bi-robot text-info ms-1" style="font-size: 0.8em;"></i>
-                                            {% endif %}
-                                        </span>
-                                        {% if sens.pdf_url %}
-                                            <a href="{{ sens.pdf_url }}" target="_blank" class="ms-2">
-                                                <i class="bi bi-file-pdf text-danger"></i>
-                                            </a>
-                                        {% endif %}
-                                    </td>
-                                    <td>
-                                        <small class="text-muted">
-                                            {{ sens.date_published.strftime('%m/%d %H:%M') if sens.date_published else 'Unknown' }}
-                                        </small>
-                                    </td>
-                                    <td>
-                                        {% if sens.is_urgent %}
-                                            <span class="badge bg-danger">
-                                                <i class="bi bi-exclamation-triangle"></i> Urgent
-                                            </span>
-                                        {% else %}
-                                            <span class="badge bg-secondary">Normal</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            </tbody>
-                        </table>
+<!-- KPI Cards Row -->
+<div class="row mb-4 g-3" id="kpiCards">
+    <div class="col-6 col-md-3">
+        <div class="card border-start border-primary border-4 h-100">
+            <div class="card-body py-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="text-muted text-uppercase small fw-bold">Total SENS</div>
+                        <h3 class="mb-0" id="kpiTotal">
+                            {{ stats.get('sens_announcements', {}).get('total', 0) }}
+                        </h3>
                     </div>
-                {% else %}
-                    <div class="text-center text-muted py-4">
-                        <i class="bi bi-inbox fs-1"></i>
-                        <p class="mt-2">No recent SENS announcements</p>
-                        <button class="btn btn-primary" onclick="triggerScrape()">
-                            <i class="bi bi-arrow-clockwise"></i> Scrape Now
-                        </button>
-                    </div>
-                {% endif %}
+                    <i class="bi bi-file-earmark-text fs-2 text-primary opacity-50"></i>
+                </div>
             </div>
         </div>
     </div>
-    
-    <!-- Watchlist Companies -->
-    <div class="col-md-4">
-        <div class="card">
+    <div class="col-6 col-md-3">
+        <div class="card border-start border-success border-4 h-100">
+            <div class="card-body py-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="text-muted text-uppercase small fw-bold">Strategic</div>
+                        <h3 class="mb-0" id="kpiStrategic">--</h3>
+                        <small class="text-success" id="kpiStrategicPct"></small>
+                    </div>
+                    <i class="bi bi-bullseye fs-2 text-success opacity-50"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-start border-warning border-4 h-100">
+            <div class="card-body py-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="text-muted text-uppercase small fw-bold">Urgent Alerts</div>
+                        <h3 class="mb-0" id="kpiUrgent">
+                            {{ stats.get('sens_announcements', {}).get('urgent', 0) }}
+                        </h3>
+                    </div>
+                    <i class="bi bi-exclamation-triangle fs-2 text-warning opacity-50"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-3">
+        <div class="card border-start border-secondary border-4 h-100">
+            <div class="card-body py-3">
+                <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                        <div class="text-muted text-uppercase small fw-bold">Noise Filtered</div>
+                        <h3 class="mb-0" id="kpiNoise">--</h3>
+                        <small class="text-muted" id="kpiNoisePct"></small>
+                    </div>
+                    <i class="bi bi-funnel fs-2 text-secondary opacity-50"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Row 1: Top Companies + Category Breakdown -->
+<div class="row mb-4 g-3">
+    <div class="col-lg-6">
+        <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">
-                    <i class="bi bi-star"></i> Watchlist
-                </h5>
+                <h6 class="mb-0"><i class="bi bi-bar-chart"></i> Top 10 Companies by SENS Volume</h6>
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="topCoExcludeNoise">
+                    <label class="form-check-label small" for="topCoExcludeNoise">Strategic only</label>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="chartTopCompanies" height="280"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-pie-chart"></i> SENS by Activity Type</h6>
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" id="catShowNoise">
+                    <label class="form-check-label small" for="catShowNoise">Include noise</label>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="chartCategories" height="280"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Row 2: Volume Over Time + Noise Doughnut -->
+<div class="row mb-4 g-3">
+    <div class="col-lg-8">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-graph-up"></i> SENS Volume Over Time</h6>
+                <div class="btn-group btn-group-sm" role="group">
+                    <button type="button" class="btn btn-outline-secondary active" data-bucket="day">Day</button>
+                    <button type="button" class="btn btn-outline-secondary" data-bucket="week">Week</button>
+                </div>
+            </div>
+            <div class="card-body">
+                <canvas id="chartVolume" height="220"></canvas>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="bi bi-funnel"></i> Strategic vs Noise</h6>
+            </div>
+            <div class="card-body d-flex align-items-center justify-content-center">
+                <canvas id="chartNoise" height="200"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Row 3: Strategic Highlights + Watchlist -->
+<div class="row mb-4 g-3">
+    <div class="col-lg-8">
+        <div class="card h-100">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-lightning-charge"></i> Strategic Highlights (Last 7 Days)</h6>
+                <a href="{{ url_for('sens_list') }}" class="btn btn-sm btn-outline-primary">View All SENS</a>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" id="highlightsTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Company</th>
+                                <th>Announcement</th>
+                                <th>Category</th>
+                                <th>Date</th>
+                            </tr>
+                        </thead>
+                        <tbody id="highlightsBody">
+                            <tr>
+                                <td colspan="4" class="text-center text-muted py-4">
+                                    <div class="spinner-border spinner-border-sm me-2"></div>Loading...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <!-- Watchlist Card -->
+        <div class="card mb-3">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h6 class="mb-0"><i class="bi bi-star"></i> Watchlist</h6>
                 <a href="{{ url_for('add_company') }}" class="btn btn-sm btn-success">
-                    <i class="bi bi-plus"></i> Add
+                    <i class="bi bi-plus"></i>
                 </a>
             </div>
-            <div class="card-body">
+            <div class="card-body py-2">
                 {% if watchlist_companies %}
                     <div class="list-group list-group-flush">
                         {% for company in watchlist_companies[:8] %}
-                        <div class="list-group-item d-flex justify-content-between align-items-center px-0">
+                        <div class="list-group-item d-flex justify-content-between align-items-center px-0 py-2">
                             <div>
-                                <strong>{{ company.name }}</strong><br>
+                                <strong class="small">{{ company.name }}</strong><br>
                                 <small class="text-muted">{{ company.jse_code }}</small>
                             </div>
                             <span class="badge bg-primary rounded-pill">Active</span>
                         </div>
                         {% endfor %}
-                        
                         {% if watchlist_companies|length > 8 %}
-                        <div class="list-group-item text-center px-0">
-                            <a href="{{ url_for('watchlist') }}" class="text-decoration-none">
+                        <div class="list-group-item text-center px-0 py-2">
+                            <a href="{{ url_for('watchlist') }}" class="text-decoration-none small">
                                 View {{ watchlist_companies|length - 8 }} more...
                             </a>
                         </div>
                         {% endif %}
                     </div>
                 {% else %}
-                    <div class="text-center text-muted py-4">
-                        <i class="bi bi-star fs-1"></i>
-                        <p class="mt-2">No companies on watchlist</p>
-                        <a href="{{ url_for('add_company') }}" class="btn btn-success btn-sm">
-                            <i class="bi bi-plus"></i> Add Company
-                        </a>
+                    <div class="text-center text-muted py-3">
+                        <i class="bi bi-star fs-3"></i>
+                        <p class="mt-1 mb-0 small">No companies on watchlist</p>
                     </div>
                 {% endif %}
             </div>
         </div>
-        
-        <!-- Quick Actions -->
-        <div class="card mt-3">
+
+        <!-- Quick Actions Card -->
+        <div class="card">
             <div class="card-header">
-                <h5 class="mb-0">
-                    <i class="bi bi-lightning"></i> Quick Actions
-                </h5>
+                <h6 class="mb-0"><i class="bi bi-lightning"></i> Quick Actions</h6>
             </div>
             <div class="card-body">
                 <div class="d-grid gap-2">
-                    <button class="btn btn-primary" onclick="triggerScrape()">
+                    <button class="btn btn-primary btn-sm" onclick="triggerScrape()">
                         <i class="bi bi-arrow-clockwise"></i> Scrape SENS Now
                     </button>
-                    <button class="btn btn-info" onclick="testNotifications()">
+                    <button class="btn btn-info btn-sm" onclick="testNotifications()">
                         <i class="bi bi-bell"></i> Test Notifications
                     </button>
-                    <button class="btn btn-warning" onclick="sendDigest()">
+                    <button class="btn btn-warning btn-sm" onclick="sendDigest()">
                         <i class="bi bi-envelope"></i> Send Daily Digest
                     </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Row 4: Company-Category Heatmap -->
+<div class="row mb-4 g-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="bi bi-grid-3x3"></i> Company Activity Heatmap &mdash; Strategic Categories</h6>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-sm table-bordered mb-0" id="heatmapTable">
+                        <thead id="heatmapHead"></thead>
+                        <tbody id="heatmapBody">
+                            <tr>
+                                <td colspan="2" class="text-center text-muted py-4">
+                                    <div class="spinner-border spinner-border-sm me-2"></div>Loading heatmap...
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
         </div>
@@ -246,4 +278,8 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 {% endblock %}

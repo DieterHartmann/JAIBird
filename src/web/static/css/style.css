@@ -228,6 +228,33 @@ footer {
     background-color: var(--info-color);
 }
 
+/* Dashboard Charts */
+.card canvas {
+    max-height: 320px;
+}
+
+#heatmapTable th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+#heatmapTable td,
+#heatmapTable th {
+    padding: 0.35rem 0.4rem;
+    vertical-align: middle;
+}
+
+/* KPI cards border accents */
+.border-4 {
+    border-width: 4px !important;
+}
+
+/* Dashboard filter row */
+#dashDaysFilter {
+    min-width: 130px;
+}
+
 /* Custom scrollbar */
 .custom-scrollbar {
     scrollbar-width: thin;
