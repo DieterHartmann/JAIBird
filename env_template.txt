@@ -17,7 +17,7 @@ DROPBOX_APP_SECRET=your_dropbox_app_secret_here
 # Telegram Bot Configuration
 # Create a bot via @BotFather on Telegram
 TELEGRAM_BOT_TOKEN=
-# Get your chat ID by messaging your bot and visiting: https://api.telegram.org/bot8358435076:AAFUzY8LQLZ3gWh-Q9kfAoSejSNXZ3BWoKQ/getUpdates
+# Get your chat ID by messaging your bot and visiting: https://api.telegram.org/bot<YOUR_BOT_TOKEN>/getUpdates
 TELEGRAM_CHAT_ID=your_telegram_chat_id_here
 
 # AI API Keys
