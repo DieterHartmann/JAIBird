@@ -22,6 +22,8 @@ services:
     volumes:
       - ./data:/app/data
       - ./.env:/app/.env:ro
+    environment:
+      - FLASK_HOST=0.0.0.0
     mem_limit: 256m
     restart: unless-stopped
     depends_on:
