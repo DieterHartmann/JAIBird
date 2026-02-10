@@ -426,6 +426,7 @@ function renderSentiment() {
 function renderHighlights() {
     const tbody = document.getElementById('highlightsBody');
     if (!tbody) return;
+    disposeTooltips(tbody);
     const data = dashData.strategic_highlights || [];
 
     if (!data.length) {
@@ -438,18 +439,25 @@ function renderHighlights() {
         return m[cat] || 'bg-dark';
     };
 
-    // Store tooltip text in a JS array to avoid attribute-escaping issues.
-    // Fall back to the full title if no AI summary is available.
-    _tooltipData.highlights = data.map(item =>
-        item.ai_summary ? `AI Summary: ${item.ai_summary}` : item.title || ''
-    );
-
     tbody.innerHTML = data.map((item, idx) => {
         const dt = item.date_published ? new Date(item.date_published).toLocaleDateString('en-ZA', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '—';
-        return `<tr class="tooltip-row" data-tooltip-group="highlights" data-tooltip-idx="${idx}"><td><strong class="small">${esc(item.company_name)}</strong></td><td class="small">${esc(item.title)}</td><td><span class="badge ${badge(item.category)} small">${esc(item.category)}</span></td><td class="small text-muted text-nowrap">${dt}</td></tr>`;
+        return `<tr class="dash-tip" data-tip-idx="${idx}"><td><strong class="small">${esc(item.company_name)}</strong></td><td class="small">${esc(item.title)}</td><td><span class="badge ${badge(item.category)} small">${esc(item.category)}</span></td><td class="small text-muted text-nowrap">${dt}</td></tr>`;
     }).join('');
 
-    attachRowTooltips();
+    // Attach Bootstrap tooltips programmatically (same system as SENS page)
+    tbody.querySelectorAll('.dash-tip').forEach((row, idx) => {
+        const item = data[idx];
+        const tipText = item.ai_summary
+            ? `<strong>AI Summary:</strong><br>${esc(item.ai_summary)}`
+            : esc(item.title);
+        new bootstrap.Tooltip(row, {
+            title: tipText,
+            html: true,
+            placement: 'top',
+            container: 'body',
+            trigger: 'hover'
+        });
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +500,7 @@ function renderEvents() {
     const row = document.getElementById('eventsRow');
     const body = document.getElementById('eventsBody');
     if (!row || !body) return;
+    disposeTooltips(body);
 
     if (!events.length && (!dashData.company_heatmap || !dashData.company_heatmap.companies?.length)) {
         row.style.display = 'none';
@@ -507,30 +516,33 @@ function renderEvents() {
             return m[t] || 'bg-secondary';
         };
 
-        // Store tooltip data and pdf urls for events
-        _tooltipData.events = events.map(e => {
-            let tip = e.ai_summary ? `AI Summary: ${e.ai_summary}` : (e.title || '');
-            if (e.pdf_url) tip += tip ? '\n\nDouble-click to open PDF' : 'Double-click to open PDF';
-            return tip;
-        });
-        _tooltipData.eventPdfUrls = events.map(e => e.pdf_url || '');
-
         body.innerHTML = events.map((e, idx) => {
             const dt = e.date ? new Date(e.date).toLocaleDateString('en-ZA', { day:'2-digit', month:'short' }) : '—';
-            const hasPdf = e.pdf_url ? ' style="cursor:pointer;"' : '';
-            return `<tr class="tooltip-row" data-tooltip-group="events" data-tooltip-idx="${idx}"${hasPdf}><td class="small">${esc(trunc(e.company, 30))}</td><td><span class="badge ${typeBadge(e.event_type)} small">${esc(e.event_type)}</span></td><td class="small text-muted text-nowrap">${dt}</td></tr>`;
+            const cls = e.pdf_url ? 'dash-tip event-pdf' : 'dash-tip';
+            return `<tr class="${cls}" data-tip-idx="${idx}"><td class="small">${esc(trunc(e.company, 30))}</td><td><span class="badge ${typeBadge(e.event_type)} small">${esc(e.event_type)}</span></td><td class="small text-muted text-nowrap">${dt}</td></tr>`;
         }).join('');
 
-        // Double-click to open PDF
-        body.querySelectorAll('tr[data-tooltip-group="events"]').forEach(row => {
-            row.addEventListener('dblclick', () => {
-                const idx = parseInt(row.dataset.tooltipIdx, 10);
-                const url = _tooltipData.eventPdfUrls[idx];
-                if (url) window.open(url, '_blank');
-            });
-        });
+        // Attach Bootstrap tooltips + double-click PDF links
+        body.querySelectorAll('.dash-tip').forEach((row, idx) => {
+            const e = events[idx];
+            let tipText = e.ai_summary
+                ? `<strong>AI Summary:</strong><br>${esc(e.ai_summary)}`
+                : `<strong>${esc(e.company)}</strong><br>${esc(e.title)}`;
+            if (e.pdf_url) tipText += '<br><em class="text-info">Double-click to open PDF</em>';
 
-        attachRowTooltips();
+            new bootstrap.Tooltip(row, {
+                title: tipText,
+                html: true,
+                placement: 'top',
+                container: 'body',
+                trigger: 'hover'
+            });
+
+            if (e.pdf_url) {
+                row.style.cursor = 'pointer';
+                row.addEventListener('dblclick', () => window.open(e.pdf_url, '_blank'));
+            }
+        });
     }
 }
 
@@ -563,56 +575,14 @@ function renderHeatmap() {
 }
 
 // ---------------------------------------------------------------------------
-// Unified Row Tooltip System
+// Tooltip cleanup helper – dispose Bootstrap tooltips before re-rendering
 // ---------------------------------------------------------------------------
-// Tooltip text is stored in this JS object keyed by group name + index,
-// avoiding HTML-attribute escaping issues with quotes etc.
-const _tooltipData = { highlights: [], events: [], eventPdfUrls: [] };
-let _rowTooltipEl = null;
-
-function _ensureTooltipEl() {
-    if (!_rowTooltipEl) {
-        _rowTooltipEl = document.createElement('div');
-        _rowTooltipEl.className = 'highlight-tooltip';
-        document.body.appendChild(_rowTooltipEl);
-    }
-    return _rowTooltipEl;
-}
-
-function attachRowTooltips() {
-    const tip = _ensureTooltipEl();
-    document.querySelectorAll('.tooltip-row').forEach(row => {
-        // Avoid attaching duplicate listeners on re-render
-        if (row._tipBound) return;
-        row._tipBound = true;
-
-        row.addEventListener('mouseenter', (e) => {
-            const group = row.dataset.tooltipGroup;
-            const idx = parseInt(row.dataset.tooltipIdx, 10);
-            const text = (_tooltipData[group] || [])[idx];
-            if (!text) return;
-            tip.textContent = text;
-            tip.style.display = 'block';
-            _positionTooltip(e);
-        });
-        row.addEventListener('mousemove', _positionTooltip);
-        row.addEventListener('mouseleave', () => {
-            tip.style.display = 'none';
-        });
+function disposeTooltips(container) {
+    if (!container) return;
+    container.querySelectorAll('.dash-tip').forEach(el => {
+        const tip = bootstrap.Tooltip.getInstance(el);
+        if (tip) tip.dispose();
     });
-}
-
-function _positionTooltip(e) {
-    if (!_rowTooltipEl) return;
-    const pad = 12;
-    const tipW = _rowTooltipEl.offsetWidth;
-    const tipH = _rowTooltipEl.offsetHeight;
-    let x = e.clientX + pad;
-    let y = e.clientY + pad;
-    if (x + tipW > window.innerWidth - pad) x = e.clientX - tipW - pad;
-    if (y + tipH > window.innerHeight - pad) y = e.clientY - tipH - pad;
-    _rowTooltipEl.style.left = x + 'px';
-    _rowTooltipEl.style.top = y + 'px';
 }
 
 // ---------------------------------------------------------------------------
