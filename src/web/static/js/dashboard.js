@@ -438,14 +438,15 @@ function renderHighlights() {
         return m[cat] || 'bg-dark';
     };
 
-    tbody.innerHTML = data.map(item => {
+    // Store summaries in a JS array to avoid attribute-escaping issues
+    _tooltipData.highlights = data.map(item => item.ai_summary || '');
+
+    tbody.innerHTML = data.map((item, idx) => {
         const dt = item.date_published ? new Date(item.date_published).toLocaleDateString('en-ZA', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '—';
-        const summary = item.ai_summary ? esc(item.ai_summary) : 'No AI summary available';
-        return `<tr class="highlight-row" data-summary="${summary}"><td><strong class="small">${esc(item.company_name)}</strong></td><td class="small">${esc(item.title)}</td><td><span class="badge ${badge(item.category)} small">${esc(item.category)}</span></td><td class="small text-muted text-nowrap">${dt}</td></tr>`;
+        return `<tr class="tooltip-row" data-tooltip-group="highlights" data-tooltip-idx="${idx}"><td><strong class="small">${esc(item.company_name)}</strong></td><td class="small">${esc(item.title)}</td><td><span class="badge ${badge(item.category)} small">${esc(item.category)}</span></td><td class="small text-muted text-nowrap">${dt}</td></tr>`;
     }).join('');
 
-    // Attach tooltip behaviour
-    attachHighlightTooltips();
+    attachRowTooltips();
 }
 
 // ---------------------------------------------------------------------------
@@ -502,10 +503,27 @@ function renderEvents() {
             const m = { 'AGM / General Meeting':'bg-primary', 'Results Announcement':'bg-success', 'Cautionary Period':'bg-danger', 'M&A Event':'bg-warning text-dark', 'Trading Statement':'bg-info text-dark' };
             return m[t] || 'bg-secondary';
         };
-        body.innerHTML = events.map(e => {
+
+        // Store tooltip data and pdf urls for events
+        _tooltipData.events = events.map(e => e.ai_summary || e.title || '');
+        _tooltipData.eventPdfUrls = events.map(e => e.pdf_url || '');
+
+        body.innerHTML = events.map((e, idx) => {
             const dt = e.date ? new Date(e.date).toLocaleDateString('en-ZA', { day:'2-digit', month:'short' }) : '—';
-            return `<tr><td class="small">${esc(trunc(e.company, 30))}</td><td><span class="badge ${typeBadge(e.event_type)} small">${esc(e.event_type)}</span></td><td class="small text-muted text-nowrap">${dt}</td></tr>`;
+            const hasPdf = e.pdf_url ? ' style="cursor:pointer;"' : '';
+            return `<tr class="tooltip-row" data-tooltip-group="events" data-tooltip-idx="${idx}"${hasPdf}><td class="small">${esc(trunc(e.company, 30))}</td><td><span class="badge ${typeBadge(e.event_type)} small">${esc(e.event_type)}</span></td><td class="small text-muted text-nowrap">${dt}</td></tr>`;
         }).join('');
+
+        // Double-click to open PDF
+        body.querySelectorAll('tr[data-tooltip-group="events"]').forEach(row => {
+            row.addEventListener('dblclick', () => {
+                const idx = parseInt(row.dataset.tooltipIdx, 10);
+                const url = _tooltipData.eventPdfUrls[idx];
+                if (url) window.open(url, '_blank');
+            });
+        });
+
+        attachRowTooltips();
     }
 }
 
@@ -538,43 +556,56 @@ function renderHeatmap() {
 }
 
 // ---------------------------------------------------------------------------
-// Strategic Highlights Tooltip
+// Unified Row Tooltip System
 // ---------------------------------------------------------------------------
-let _highlightTooltip = null;
+// Tooltip text is stored in this JS object keyed by group name + index,
+// avoiding HTML-attribute escaping issues with quotes etc.
+const _tooltipData = { highlights: [], events: [], eventPdfUrls: [] };
+let _rowTooltipEl = null;
 
-function attachHighlightTooltips() {
-    if (!_highlightTooltip) {
-        _highlightTooltip = document.createElement('div');
-        _highlightTooltip.className = 'highlight-tooltip';
-        document.body.appendChild(_highlightTooltip);
+function _ensureTooltipEl() {
+    if (!_rowTooltipEl) {
+        _rowTooltipEl = document.createElement('div');
+        _rowTooltipEl.className = 'highlight-tooltip';
+        document.body.appendChild(_rowTooltipEl);
     }
+    return _rowTooltipEl;
+}
 
-    document.querySelectorAll('.highlight-row').forEach(row => {
+function attachRowTooltips() {
+    const tip = _ensureTooltipEl();
+    document.querySelectorAll('.tooltip-row').forEach(row => {
+        // Avoid attaching duplicate listeners on re-render
+        if (row._tipBound) return;
+        row._tipBound = true;
+
         row.addEventListener('mouseenter', (e) => {
-            const summary = row.getAttribute('data-summary');
-            if (!summary) return;
-            _highlightTooltip.innerHTML = summary;
-            _highlightTooltip.style.display = 'block';
-            positionTooltip(e);
+            const group = row.dataset.tooltipGroup;
+            const idx = parseInt(row.dataset.tooltipIdx, 10);
+            const text = (_tooltipData[group] || [])[idx];
+            if (!text) return;
+            tip.textContent = text;
+            tip.style.display = 'block';
+            _positionTooltip(e);
         });
-        row.addEventListener('mousemove', positionTooltip);
+        row.addEventListener('mousemove', _positionTooltip);
         row.addEventListener('mouseleave', () => {
-            _highlightTooltip.style.display = 'none';
+            tip.style.display = 'none';
         });
     });
 }
 
-function positionTooltip(e) {
-    if (!_highlightTooltip) return;
+function _positionTooltip(e) {
+    if (!_rowTooltipEl) return;
     const pad = 12;
-    const tipW = _highlightTooltip.offsetWidth;
-    const tipH = _highlightTooltip.offsetHeight;
+    const tipW = _rowTooltipEl.offsetWidth;
+    const tipH = _rowTooltipEl.offsetHeight;
     let x = e.clientX + pad;
     let y = e.clientY + pad;
     if (x + tipW > window.innerWidth - pad) x = e.clientX - tipW - pad;
     if (y + tipH > window.innerHeight - pad) y = e.clientY - tipH - pad;
-    _highlightTooltip.style.left = x + 'px';
-    _highlightTooltip.style.top = y + 'px';
+    _rowTooltipEl.style.left = x + 'px';
+    _rowTooltipEl.style.top = y + 'px';
 }
 
 // ---------------------------------------------------------------------------

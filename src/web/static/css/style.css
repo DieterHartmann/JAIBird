@@ -300,8 +300,11 @@ footer {
     word-wrap: break-word;
 }
 
-.highlight-row {
+.tooltip-row {
     cursor: default;
+}
+.tooltip-row[style*="cursor:pointer"]:hover {
+    background-color: #e8f4fd !important;
 }
 
 /* Custom scrollbar */

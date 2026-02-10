@@ -207,6 +207,7 @@ def categorize_announcements(announcements) -> List[Dict[str, Any]]:
             "category": cat,
             "is_noise": noise,
             "ai_summary": getattr(ann, "ai_summary", None) or "",
+            "pdf_url": getattr(ann, "pdf_url", None) or "",
         })
     return results
 
@@ -635,6 +636,9 @@ def get_upcoming_events(categorised: List[Dict]) -> List[Dict[str, Any]]:
                         "event_type": event_type,
                         "title": item["title"],
                         "date": item["date_published"],
+                        "sens_number": item.get("sens_number", ""),
+                        "pdf_url": item.get("pdf_url", ""),
+                        "ai_summary": item.get("ai_summary", ""),
                     })
                 break
 
