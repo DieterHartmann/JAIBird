@@ -441,21 +441,28 @@ function renderHighlights() {
 
     tbody.innerHTML = data.map((item, idx) => {
         const dt = item.date_published ? new Date(item.date_published).toLocaleDateString('en-ZA', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '—';
-        return `<tr class="dash-tip" data-tip-idx="${idx}"><td><strong class="small">${esc(item.company_name)}</strong></td><td class="small">${esc(item.title)}</td><td><span class="badge ${badge(item.category)} small">${esc(item.category)}</span></td><td class="small text-muted text-nowrap">${dt}</td></tr>`;
+        const hasSum = item.ai_summary ? true : false;
+        const icon = hasSum ? ' <i class="bi bi-robot text-info" style="font-size:0.75em;"></i>' : '';
+        return `<tr>` +
+            `<td><strong class="small">${esc(item.company_name)}</strong></td>` +
+            `<td><div class="dash-tip" style="cursor:help;" data-tip-idx="${idx}">${esc(item.title)}${icon}</div></td>` +
+            `<td><span class="badge ${badge(item.category)} small">${esc(item.category)}</span></td>` +
+            `<td class="small text-muted text-nowrap">${dt}</td>` +
+            `</tr>`;
     }).join('');
 
-    // Attach Bootstrap tooltips programmatically (same system as SENS page)
-    tbody.querySelectorAll('.dash-tip').forEach((row, idx) => {
+    // Attach Bootstrap tooltips on the <div> inside each cell (same pattern as SENS page)
+    tbody.querySelectorAll('.dash-tip').forEach(el => {
+        const idx = parseInt(el.dataset.tipIdx, 10);
         const item = data[idx];
-        const tipText = item.ai_summary
-            ? `<strong>AI Summary:</strong><br>${esc(item.ai_summary)}`
+        const tipHtml = item.ai_summary
+            ? '<strong>AI Summary:</strong><br>' + esc(item.ai_summary)
             : esc(item.title);
-        new bootstrap.Tooltip(row, {
-            title: tipText,
+        new bootstrap.Tooltip(el, {
+            title: tipHtml,
             html: true,
             placement: 'top',
-            container: 'body',
-            trigger: 'hover'
+            container: 'body'
         });
     });
 }
@@ -518,30 +525,37 @@ function renderEvents() {
 
         body.innerHTML = events.map((e, idx) => {
             const dt = e.date ? new Date(e.date).toLocaleDateString('en-ZA', { day:'2-digit', month:'short' }) : '—';
-            const cls = e.pdf_url ? 'dash-tip event-pdf' : 'dash-tip';
-            return `<tr class="${cls}" data-tip-idx="${idx}"><td class="small">${esc(trunc(e.company, 30))}</td><td><span class="badge ${typeBadge(e.event_type)} small">${esc(e.event_type)}</span></td><td class="small text-muted text-nowrap">${dt}</td></tr>`;
+            const rowCls = e.pdf_url ? 'event-pdf-row' : '';
+            return `<tr class="${rowCls}" data-evt-idx="${idx}">` +
+                `<td><div class="dash-tip" style="cursor:help;" data-tip-idx="${idx}">${esc(trunc(e.company, 30))}</div></td>` +
+                `<td><span class="badge ${typeBadge(e.event_type)} small">${esc(e.event_type)}</span></td>` +
+                `<td class="small text-muted text-nowrap">${dt}</td>` +
+                `</tr>`;
         }).join('');
 
-        // Attach Bootstrap tooltips + double-click PDF links
-        body.querySelectorAll('.dash-tip').forEach((row, idx) => {
+        // Attach Bootstrap tooltips on the <div> inside each cell
+        body.querySelectorAll('.dash-tip').forEach(el => {
+            const idx = parseInt(el.dataset.tipIdx, 10);
             const e = events[idx];
-            let tipText = e.ai_summary
-                ? `<strong>AI Summary:</strong><br>${esc(e.ai_summary)}`
-                : `<strong>${esc(e.company)}</strong><br>${esc(e.title)}`;
-            if (e.pdf_url) tipText += '<br><em class="text-info">Double-click to open PDF</em>';
+            let tipHtml = e.ai_summary
+                ? '<strong>AI Summary:</strong><br>' + esc(e.ai_summary)
+                : '<strong>' + esc(e.company) + '</strong><br>' + esc(e.title);
+            if (e.pdf_url) tipHtml += '<br><em class="text-info">Double-click row to open PDF</em>';
 
-            new bootstrap.Tooltip(row, {
-                title: tipText,
+            new bootstrap.Tooltip(el, {
+                title: tipHtml,
                 html: true,
                 placement: 'top',
-                container: 'body',
-                trigger: 'hover'
+                container: 'body'
             });
+        });
 
-            if (e.pdf_url) {
-                row.style.cursor = 'pointer';
-                row.addEventListener('dblclick', () => window.open(e.pdf_url, '_blank'));
-            }
+        // Double-click row to open PDF
+        body.querySelectorAll('.event-pdf-row').forEach(tr => {
+            const idx = parseInt(tr.dataset.evtIdx, 10);
+            const url = events[idx].pdf_url;
+            tr.style.cursor = 'pointer';
+            tr.addEventListener('dblclick', () => window.open(url, '_blank'));
         });
     }
 }
