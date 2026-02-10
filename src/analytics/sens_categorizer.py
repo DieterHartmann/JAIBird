@@ -344,3 +344,414 @@ def get_all_categories() -> List[Dict[str, Any]]:
             for cat, _, noise in _CATEGORY_RULES] + [
                 {"name": "Other / Uncategorised", "is_noise": False}
             ]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2: Advanced dashboard analytics
+# ---------------------------------------------------------------------------
+
+def get_today_strategic(categorised: List[Dict]) -> List[Dict[str, Any]]:
+    """
+    Today's strategic (non-noise) announcements for the ticker banner.
+    """
+    today = datetime.now().date()
+    results = []
+    for item in categorised:
+        dt = item.get("date_published")
+        if dt and dt.date() == today and not item["is_noise"]:
+            results.append(item)
+    # Most recent first
+    results.sort(key=lambda x: x["date_published"] or datetime.min, reverse=True)
+    return results
+
+
+def get_director_dealing_signal(categorised: List[Dict]) -> Dict[str, Any]:
+    """
+    Analyse director dealings to determine net buy/sell signal.
+
+    Sub-classifies "Dealings by Directors" into buys vs sells based on
+    title keyword heuristics.
+    """
+    buy_pattern = re.compile(
+        r"purchase|acquisition|bought|buy|acquire|exercise\s+of\s+options|"
+        r"settlement\s+of\s+shares|share\s+incentive|employee\s+share\s+plan",
+        re.IGNORECASE
+    )
+    sell_pattern = re.compile(
+        r"(?<!ac)(?<!dis)sale|sold|dispos(?:al|ed)|selling",
+        re.IGNORECASE
+    )
+
+    buys = []
+    sells = []
+    neutral = []
+
+    for item in categorised:
+        if item["category"] != "Dealings by Directors":
+            continue
+
+        title = item["title"]
+        is_buy = bool(buy_pattern.search(title))
+        is_sell = bool(sell_pattern.search(title))
+
+        record = {
+            "company_name": item["company_name"],
+            "title": item["title"],
+            "date_published": item["date_published"],
+        }
+
+        if is_buy and not is_sell:
+            buys.append(record)
+        elif is_sell and not is_buy:
+            sells.append(record)
+        else:
+            neutral.append(record)
+
+    # Net signal
+    net = len(buys) - len(sells)
+    if net > 0:
+        signal = "Net Buying"
+    elif net < 0:
+        signal = "Net Selling"
+    else:
+        signal = "Neutral"
+
+    return {
+        "signal": signal,
+        "net": net,
+        "total_dealings": len(buys) + len(sells) + len(neutral),
+        "buys": len(buys),
+        "sells": len(sells),
+        "neutral": len(neutral),
+        "recent_buys": sorted(buys, key=lambda x: x["date_published"] or datetime.min, reverse=True)[:5],
+        "recent_sells": sorted(sells, key=lambda x: x["date_published"] or datetime.min, reverse=True)[:5],
+    }
+
+
+def get_unusual_activity_alerts(categorised: List[Dict],
+                                 lookback_days: int = 30,
+                                 threshold_factor: float = 2.0) -> List[Dict[str, Any]]:
+    """
+    Flag companies whose recent SENS frequency is unusually high.
+
+    Compares each company's last-7-day count against their average
+    weekly rate over the lookback period.
+    """
+    now = datetime.now()
+    cutoff = now - timedelta(days=lookback_days)
+    recent_cutoff = now - timedelta(days=7)
+
+    # Build per-company time data
+    company_all: Dict[str, int] = Counter()
+    company_recent: Dict[str, int] = Counter()
+
+    for item in categorised:
+        dt = item.get("date_published")
+        if not dt or dt < cutoff:
+            continue
+        name = item["company_name"]
+        company_all[name] += 1
+        if dt >= recent_cutoff:
+            company_recent[name] += 1
+
+    weeks = max(lookback_days / 7, 1)
+    alerts = []
+    for company, recent_count in company_recent.items():
+        total = company_all.get(company, 0)
+        avg_weekly = total / weeks
+        if avg_weekly > 0 and recent_count > avg_weekly * threshold_factor and recent_count >= 3:
+            alerts.append({
+                "company": company,
+                "recent_7d": recent_count,
+                "avg_weekly": round(avg_weekly, 1),
+                "ratio": round(recent_count / avg_weekly, 1) if avg_weekly else 0,
+            })
+
+    # Sort by ratio descending
+    alerts.sort(key=lambda x: x["ratio"], reverse=True)
+    return alerts[:10]
+
+
+def get_watchlist_pulse(categorised: List[Dict],
+                        watchlist_names: List[str]) -> Dict[str, Any]:
+    """
+    Compare watchlist company SENS activity vs the overall market.
+
+    Args:
+        categorised: All categorised announcements
+        watchlist_names: List of watchlist company names
+    """
+    if not watchlist_names or not categorised:
+        return {
+            "watchlist_count": 0,
+            "market_count": 0,
+            "watchlist_strategic": 0,
+            "market_strategic": 0,
+            "watchlist_companies": [],
+        }
+
+    wl_lower = [n.lower() for n in watchlist_names]
+
+    def is_watchlist(name: str) -> bool:
+        name_l = name.lower()
+        for wl in wl_lower:
+            if wl in name_l or name_l in wl:
+                return True
+        return False
+
+    wl_count = 0
+    wl_strategic = 0
+    market_count = len(categorised)
+    market_strategic = 0
+    per_company: Dict[str, Dict[str, int]] = defaultdict(lambda: {"total": 0, "strategic": 0})
+
+    for item in categorised:
+        if not item["is_noise"]:
+            market_strategic += 1
+        if is_watchlist(item["company_name"]):
+            wl_count += 1
+            co = item["company_name"]
+            per_company[co]["total"] += 1
+            if not item["is_noise"]:
+                wl_strategic += 1
+                per_company[co]["strategic"] += 1
+
+    company_list = sorted(
+        [{"company": k, **v} for k, v in per_company.items()],
+        key=lambda x: x["total"], reverse=True
+    )
+
+    return {
+        "watchlist_count": wl_count,
+        "market_count": market_count,
+        "watchlist_strategic": wl_strategic,
+        "market_strategic": market_strategic,
+        "watchlist_pct": round(wl_count / market_count * 100, 1) if market_count else 0,
+        "watchlist_companies": company_list,
+    }
+
+
+def get_sentiment_summary(announcements_with_summaries: List[Dict]) -> Dict[str, Any]:
+    """
+    Simple keyword-based sentiment analysis of AI summaries.
+
+    Scores each summary as positive / negative / neutral based on
+    keyword frequency. Returns aggregate stats and per-company scores.
+    """
+    positive_words = re.compile(
+        r"\b(?:growth|increase|profit|gain|strong|positive|improvement|"
+        r"exceed|outperform|upgrade|beat|record|successful|dividend|"
+        r"expansion|milestone|optimistic|recovery|robust|surplus|"
+        r"confident|opportunity|upside)\b",
+        re.IGNORECASE
+    )
+    negative_words = re.compile(
+        r"\b(?:loss|decline|decrease|negative|warning|risk|concern|"
+        r"impairment|writedown|write-down|downgrade|underperform|"
+        r"deteriorat|weak|challenge|uncertainty|cautionary|default|"
+        r"restructur|retrench|suspend|liquidat|fraud|irregular)\b",
+        re.IGNORECASE
+    )
+
+    scores = []
+    company_sentiment: Dict[str, List[float]] = defaultdict(list)
+
+    for item in announcements_with_summaries:
+        summary = item.get("ai_summary", "")
+        if not summary:
+            continue
+
+        pos = len(positive_words.findall(summary))
+        neg = len(negative_words.findall(summary))
+        total = pos + neg
+        if total == 0:
+            score = 0.0
+        else:
+            score = (pos - neg) / total  # Range: -1 to +1
+
+        scores.append(score)
+        company_sentiment[item["company_name"]].append(score)
+
+    # Aggregate
+    if scores:
+        avg_score = sum(scores) / len(scores)
+    else:
+        avg_score = 0.0
+
+    positive_count = sum(1 for s in scores if s > 0.2)
+    negative_count = sum(1 for s in scores if s < -0.2)
+    neutral_count = len(scores) - positive_count - negative_count
+
+    # Per-company average
+    company_scores = []
+    for name, s_list in company_sentiment.items():
+        avg = sum(s_list) / len(s_list) if s_list else 0
+        company_scores.append({
+            "company": name,
+            "avg_sentiment": round(avg, 2),
+            "count": len(s_list),
+            "label": "Positive" if avg > 0.2 else ("Negative" if avg < -0.2 else "Neutral"),
+        })
+    company_scores.sort(key=lambda x: x["avg_sentiment"], reverse=True)
+
+    return {
+        "overall_score": round(avg_score, 2),
+        "overall_label": "Positive" if avg_score > 0.2 else ("Negative" if avg_score < -0.2 else "Neutral"),
+        "positive": positive_count,
+        "negative": negative_count,
+        "neutral": neutral_count,
+        "total_analysed": len(scores),
+        "company_scores": company_scores[:15],
+    }
+
+
+def get_upcoming_events(categorised: List[Dict]) -> List[Dict[str, Any]]:
+    """
+    Extract upcoming corporate events from SENS titles.
+
+    Looks for patterns indicating AGMs, results releases, meetings etc.
+    that mention future dates or are forward-looking.
+    """
+    event_patterns = [
+        (re.compile(r"(?:notice\s+of|upcoming)\s+.*general\s+meeting", re.I), "AGM / General Meeting"),
+        (re.compile(r"(?:notice|release)\s+(?:of|regarding).*(?:financial\s+results|results\s+presentation)", re.I), "Results Announcement"),
+        (re.compile(r"distribution\s+(?:of\s+)?circular", re.I), "Circular Distribution"),
+        (re.compile(r"cautionary\s+announcement", re.I), "Cautionary Period"),
+        (re.compile(r"firm\s+intention|general\s+offer", re.I), "M&A Event"),
+        (re.compile(r"trading\s+statement", re.I), "Trading Statement"),
+    ]
+
+    events = []
+    seen = set()
+    for item in categorised:
+        for pattern, event_type in event_patterns:
+            if pattern.search(item["title"]):
+                key = (item["company_name"], event_type)
+                if key not in seen:
+                    seen.add(key)
+                    events.append({
+                        "company": item["company_name"],
+                        "event_type": event_type,
+                        "title": item["title"],
+                        "date": item["date_published"],
+                    })
+                break
+
+    # Sort by date, most recent first
+    events.sort(key=lambda x: x["date"] or datetime.min, reverse=True)
+    return events[:20]
+
+
+# ---------------------------------------------------------------------------
+# JSE Sector classification (static lookup for known companies)
+# ---------------------------------------------------------------------------
+
+_JSE_SECTOR_MAP = {
+    # Banking & Financial Services
+    "standard bank": "Banking",
+    "absa": "Banking",
+    "firstrand": "Banking",
+    "nedbank": "Banking",
+    "investec": "Financial Services",
+    "capitec": "Banking",
+    "discovery": "Financial Services",
+    "sanlam": "Financial Services",
+    "old mutual": "Financial Services",
+    "momentum": "Financial Services",
+    "african bank": "Banking",
+
+    # Mining & Resources
+    "anglo american": "Mining",
+    "bhp": "Mining",
+    "glencore": "Mining",
+    "south32": "Mining",
+    "kumba": "Mining",
+    "exxaro": "Mining",
+    "gold fields": "Mining",
+    "harmony": "Mining",
+    "impala platinum": "Mining",
+    "sibanye": "Mining",
+    "northam": "Mining",
+    "anglo platinum": "Mining",
+    "eastern platinum": "Mining",
+    "orion mineral": "Mining",
+    "southern palladium": "Mining",
+
+    # Retail & Consumer
+    "shoprite": "Retail",
+    "pick n pay": "Retail",
+    "clicks": "Retail",
+    "woolworths": "Retail",
+    "mr price": "Retail",
+    "truworths": "Retail",
+    "spar": "Retail",
+    "pepkor": "Retail",
+    "dis-chem": "Retail",
+
+    # Telecoms & Technology
+    "mtn": "Telecoms",
+    "vodacom": "Telecoms",
+    "telkom": "Telecoms",
+    "bytes technology": "Technology",
+    "datatec": "Technology",
+    "naspers": "Technology",
+    "prosus": "Technology",
+
+    # Property
+    "redefine": "Property",
+    "growthpoint": "Property",
+    "emira": "Property",
+    "accelerate": "Property",
+    "attacq": "Property",
+    "vukile": "Property",
+    "resilient": "Property",
+
+    # Industrial
+    "barloworld": "Industrial",
+    "bidvest": "Industrial",
+    "imperial": "Industrial",
+    "mondi": "Industrial",
+    "sappi": "Industrial",
+    "sasol": "Energy",
+    "british american tobacco": "Consumer Goods",
+    "quilter": "Financial Services",
+    "life healthcare": "Healthcare",
+    "mediclinic": "Healthcare",
+    "netcare": "Healthcare",
+
+    # ETFs & Fund Managers
+    "satrix": "ETF / Fund",
+    "sygnia": "ETF / Fund",
+    "prescient": "ETF / Fund",
+    "allan gray": "ETF / Fund",
+    "1nvest": "ETF / Fund",
+    "easyetf": "ETF / Fund",
+    "10x fund": "ETF / Fund",
+    "fnb cis": "ETF / Fund",
+    "newgold": "ETF / Fund",
+    "newwave": "ETF / Fund",
+    "goldman sachs": "Investment Bank",
+    "ubs": "Investment Bank",
+    "bnp paribas": "Investment Bank",
+}
+
+
+def classify_sector(company_name: str) -> str:
+    """Classify a company into a JSE sector based on name matching."""
+    name_lower = company_name.lower()
+    for key, sector in _JSE_SECTOR_MAP.items():
+        if key in name_lower:
+            return sector
+    return "Other"
+
+
+def get_sector_breakdown(categorised: List[Dict],
+                          exclude_noise: bool = True) -> List[Dict[str, Any]]:
+    """SENS announcements grouped by JSE sector."""
+    counter: Counter = Counter()
+    for item in categorised:
+        if exclude_noise and item["is_noise"]:
+            continue
+        sector = classify_sector(item["company_name"])
+        counter[sector] += 1
+    return [{"sector": s, "count": c} for s, c in counter.most_common()]

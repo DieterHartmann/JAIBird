@@ -26,63 +26,71 @@
     </div>
 </div>
 
+<!-- TODAY TICKER BANNER -->
+<div id="todayTickerWrapper" class="mb-3" style="display:none;">
+    <div class="card border-start border-danger border-4 bg-light">
+        <div class="card-body py-2 px-3">
+            <div class="d-flex align-items-center">
+                <span class="badge bg-danger me-2"><i class="bi bi-broadcast"></i> TODAY</span>
+                <div id="todayTicker" class="flex-grow-1 overflow-hidden" style="white-space:nowrap;">
+                    <div id="todayTickerContent" class="ticker-scroll"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- KPI Cards Row -->
 <div class="row mb-4 g-3" id="kpiCards">
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-lg-2">
         <div class="card border-start border-primary border-4 h-100">
-            <div class="card-body py-3">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="text-muted text-uppercase small fw-bold">Total SENS</div>
-                        <h3 class="mb-0" id="kpiTotal">
-                            {{ stats.get('sens_announcements', {}).get('total', 0) }}
-                        </h3>
-                    </div>
-                    <i class="bi bi-file-earmark-text fs-2 text-primary opacity-50"></i>
-                </div>
+            <div class="card-body py-3 px-3">
+                <div class="text-muted text-uppercase small fw-bold" style="font-size:0.7rem;">Total SENS</div>
+                <h3 class="mb-0" id="kpiTotal">{{ stats.get('sens_announcements', {}).get('total', 0) }}</h3>
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-lg-2">
         <div class="card border-start border-success border-4 h-100">
-            <div class="card-body py-3">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="text-muted text-uppercase small fw-bold">Strategic</div>
-                        <h3 class="mb-0" id="kpiStrategic">--</h3>
-                        <small class="text-success" id="kpiStrategicPct"></small>
-                    </div>
-                    <i class="bi bi-bullseye fs-2 text-success opacity-50"></i>
-                </div>
+            <div class="card-body py-3 px-3">
+                <div class="text-muted text-uppercase small fw-bold" style="font-size:0.7rem;">Strategic</div>
+                <h3 class="mb-0" id="kpiStrategic">--</h3>
+                <small class="text-success" id="kpiStrategicPct" style="font-size:0.7rem;"></small>
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-lg-2">
         <div class="card border-start border-warning border-4 h-100">
-            <div class="card-body py-3">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="text-muted text-uppercase small fw-bold">Urgent Alerts</div>
-                        <h3 class="mb-0" id="kpiUrgent">
-                            {{ stats.get('sens_announcements', {}).get('urgent', 0) }}
-                        </h3>
-                    </div>
-                    <i class="bi bi-exclamation-triangle fs-2 text-warning opacity-50"></i>
-                </div>
+            <div class="card-body py-3 px-3">
+                <div class="text-muted text-uppercase small fw-bold" style="font-size:0.7rem;">Urgent</div>
+                <h3 class="mb-0" id="kpiUrgent">{{ stats.get('sens_announcements', {}).get('urgent', 0) }}</h3>
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-3">
+    <div class="col-6 col-lg-2">
         <div class="card border-start border-secondary border-4 h-100">
-            <div class="card-body py-3">
-                <div class="d-flex justify-content-between align-items-center">
-                    <div>
-                        <div class="text-muted text-uppercase small fw-bold">Noise Filtered</div>
-                        <h3 class="mb-0" id="kpiNoise">--</h3>
-                        <small class="text-muted" id="kpiNoisePct"></small>
-                    </div>
-                    <i class="bi bi-funnel fs-2 text-secondary opacity-50"></i>
-                </div>
+            <div class="card-body py-3 px-3">
+                <div class="text-muted text-uppercase small fw-bold" style="font-size:0.7rem;">Noise Filtered</div>
+                <h3 class="mb-0" id="kpiNoise">--</h3>
+                <small class="text-muted" id="kpiNoisePct" style="font-size:0.7rem;"></small>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="card border-start border-info border-4 h-100">
+            <div class="card-body py-3 px-3">
+                <div class="text-muted text-uppercase small fw-bold" style="font-size:0.7rem;">Sentiment</div>
+                <h3 class="mb-0" id="kpiSentiment">--</h3>
+                <small id="kpiSentimentLabel" style="font-size:0.7rem;"></small>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-lg-2">
+        <div class="card border-start border-4 h-100" id="kpiDirectorCard" style="border-color:#6f42c1!important;">
+            <div class="card-body py-3 px-3">
+                <div class="text-muted text-uppercase small fw-bold" style="font-size:0.7rem;">Director Signal</div>
+                <h3 class="mb-0" id="kpiDirectorSignal">--</h3>
+                <small id="kpiDirectorDetail" style="font-size:0.7rem;"></small>
             </div>
         </div>
     </div>
@@ -120,7 +128,7 @@
     </div>
 </div>
 
-<!-- Row 2: Volume Over Time + Noise Doughnut -->
+<!-- Row 2: Volume Over Time + Sector Breakdown -->
 <div class="row mb-4 g-3">
     <div class="col-lg-8">
         <div class="card h-100">
@@ -139,18 +147,56 @@
     <div class="col-lg-4">
         <div class="card h-100">
             <div class="card-header">
-                <h6 class="mb-0"><i class="bi bi-funnel"></i> Strategic vs Noise</h6>
+                <h6 class="mb-0"><i class="bi bi-diagram-3"></i> Activity by Sector</h6>
             </div>
             <div class="card-body d-flex align-items-center justify-content-center">
-                <canvas id="chartNoise" height="200"></canvas>
+                <canvas id="chartSector" height="220"></canvas>
             </div>
         </div>
     </div>
 </div>
 
-<!-- Row 3: Strategic Highlights + Watchlist -->
+<!-- Row 3: Director Dealing Signal + Unusual Activity + Noise Doughnut -->
 <div class="row mb-4 g-3">
-    <div class="col-lg-8">
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="bi bi-people"></i> Director Dealing Signal</h6>
+            </div>
+            <div class="card-body">
+                <div id="directorSignalBody" class="small">
+                    <div class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm"></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="bi bi-exclamation-diamond"></i> Unusual Activity Alerts</h6>
+            </div>
+            <div class="card-body p-0">
+                <div id="unusualAlertsBody" class="small">
+                    <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card h-100">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="bi bi-funnel"></i> Strategic vs Noise</h6>
+            </div>
+            <div class="card-body d-flex align-items-center justify-content-center">
+                <canvas id="chartNoise" height="180"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Row 4: Strategic Highlights + Watchlist Pulse + Quick Actions -->
+<div class="row mb-4 g-3">
+    <div class="col-lg-6">
         <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
                 <h6 class="mb-0"><i class="bi bi-lightning-charge"></i> Strategic Highlights (Last 7 Days)</h6>
@@ -168,11 +214,7 @@
                             </tr>
                         </thead>
                         <tbody id="highlightsBody">
-                            <tr>
-                                <td colspan="4" class="text-center text-muted py-4">
-                                    <div class="spinner-border spinner-border-sm me-2"></div>Loading...
-                                </td>
-                            </tr>
+                            <tr><td colspan="4" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading...</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -180,51 +222,37 @@
         </div>
     </div>
 
-    <div class="col-lg-4">
-        <!-- Watchlist Card -->
-        <div class="card mb-3">
+    <div class="col-lg-3">
+        <!-- Watchlist Pulse -->
+        <div class="card h-100">
             <div class="card-header d-flex justify-content-between align-items-center">
-                <h6 class="mb-0"><i class="bi bi-star"></i> Watchlist</h6>
-                <a href="{{ url_for('add_company') }}" class="btn btn-sm btn-success">
-                    <i class="bi bi-plus"></i>
-                </a>
+                <h6 class="mb-0"><i class="bi bi-heart-pulse"></i> Watchlist Pulse</h6>
+                <a href="{{ url_for('add_company') }}" class="btn btn-sm btn-success"><i class="bi bi-plus"></i></a>
             </div>
-            <div class="card-body py-2">
-                {% if watchlist_companies %}
-                    <div class="list-group list-group-flush">
-                        {% for company in watchlist_companies[:8] %}
-                        <div class="list-group-item d-flex justify-content-between align-items-center px-0 py-2">
-                            <div>
-                                <strong class="small">{{ company.name }}</strong><br>
-                                <small class="text-muted">{{ company.jse_code }}</small>
-                            </div>
-                            <span class="badge bg-primary rounded-pill">Active</span>
-                        </div>
-                        {% endfor %}
-                        {% if watchlist_companies|length > 8 %}
-                        <div class="list-group-item text-center px-0 py-2">
-                            <a href="{{ url_for('watchlist') }}" class="text-decoration-none small">
-                                View {{ watchlist_companies|length - 8 }} more...
-                            </a>
-                        </div>
-                        {% endif %}
-                    </div>
-                {% else %}
-                    <div class="text-center text-muted py-3">
-                        <i class="bi bi-star fs-3"></i>
-                        <p class="mt-1 mb-0 small">No companies on watchlist</p>
-                    </div>
-                {% endif %}
+            <div class="card-body py-2" id="watchlistPulseBody">
+                <div class="text-center text-muted py-3"><div class="spinner-border spinner-border-sm"></div></div>
             </div>
         </div>
+    </div>
 
-        <!-- Quick Actions Card -->
+    <div class="col-lg-3">
+        <!-- Sentiment Overview -->
+        <div class="card mb-3">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="bi bi-emoji-smile"></i> Sentiment Overview</h6>
+            </div>
+            <div class="card-body py-2">
+                <canvas id="chartSentiment" height="120"></canvas>
+                <div id="sentimentDetail" class="mt-2 small"></div>
+            </div>
+        </div>
+        <!-- Quick Actions -->
         <div class="card">
             <div class="card-header">
                 <h6 class="mb-0"><i class="bi bi-lightning"></i> Quick Actions</h6>
             </div>
-            <div class="card-body">
-                <div class="d-grid gap-2">
+            <div class="card-body py-2">
+                <div class="d-grid gap-1">
                     <button class="btn btn-primary btn-sm" onclick="triggerScrape()">
                         <i class="bi bi-arrow-clockwise"></i> Scrape SENS Now
                     </button>
@@ -240,23 +268,49 @@
     </div>
 </div>
 
-<!-- Row 4: Company-Category Heatmap -->
-<div class="row mb-4 g-3">
+<!-- Row 5: PDF Summary Cards for Watchlist -->
+<div class="row mb-4 g-3" id="summaryCardsRow" style="display:none;">
     <div class="col-12">
         <div class="card">
             <div class="card-header">
-                <h6 class="mb-0"><i class="bi bi-grid-3x3"></i> Company Activity Heatmap &mdash; Strategic Categories</h6>
+                <h6 class="mb-0"><i class="bi bi-robot"></i> Latest AI Summaries &mdash; Watchlist Companies</h6>
             </div>
-            <div class="card-body">
+            <div class="card-body" id="summaryCardsBody">
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Row 6: Upcoming Events / Calendar -->
+<div class="row mb-4 g-3" id="eventsRow" style="display:none;">
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="bi bi-calendar-event"></i> Recent Corporate Events</h6>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                            <tr><th>Company</th><th>Event</th><th>Date</th></tr>
+                        </thead>
+                        <tbody id="eventsBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="bi bi-grid-3x3"></i> Company Activity Heatmap</h6>
+            </div>
+            <div class="card-body p-0">
                 <div class="table-responsive">
                     <table class="table table-sm table-bordered mb-0" id="heatmapTable">
                         <thead id="heatmapHead"></thead>
                         <tbody id="heatmapBody">
-                            <tr>
-                                <td colspan="2" class="text-center text-muted py-4">
-                                    <div class="spinner-border spinner-border-sm me-2"></div>Loading heatmap...
-                                </td>
-                            </tr>
+                            <tr><td colspan="2" class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm me-2"></div>Loading...</td></tr>
                         </tbody>
                     </table>
                 </div>

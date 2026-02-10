@@ -255,6 +255,33 @@ footer {
     min-width: 130px;
 }
 
+/* Today ticker banner */
+.ticker-scroll {
+    display: inline-block;
+    animation: ticker-slide 30s linear infinite;
+}
+
+.ticker-scroll:hover {
+    animation-play-state: paused;
+}
+
+.ticker-item {
+    white-space: nowrap;
+}
+
+@keyframes ticker-slide {
+    0%   { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+}
+
+/* Summary cards */
+#summaryCardsBody .card {
+    transition: box-shadow 0.2s;
+}
+#summaryCardsBody .card:hover {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
 /* Custom scrollbar */
 .custom-scrollbar {
     scrollbar-width: thin;

@@ -82,6 +82,7 @@ class DatabaseManager:
         """Context manager for database connections."""
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row  # Enable dict-like access to rows
+        conn.execute("PRAGMA journal_mode=WAL")  # Better concurrent read/write
         try:
             yield conn
             conn.commit()
@@ -603,3 +604,76 @@ class DatabaseManager:
             if row:
                 return self._row_to_sens_announcement(row)
             return None
+
+    # ============================================================================
+    # EXECUTIVE DASHBOARD HELPERS
+    # ============================================================================
+
+    def get_watchlist_sens(self, days: int = 30) -> List[SensAnnouncement]:
+        """Get SENS announcements for watchlist companies in the last N days."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            # Use fuzzy matching similar to is_company_on_watchlist
+            cursor.execute("""
+                SELECT s.* FROM sens_announcements s
+                INNER JOIN companies c ON c.active_status = TRUE AND (
+                    LOWER(s.company_name) LIKE LOWER('%' || c.name || '%') OR
+                    LOWER(s.company_name) LIKE LOWER('%' || c.jse_code || '%') OR
+                    LOWER(c.name) LIKE LOWER('%' || s.company_name || '%')
+                )
+                WHERE s.date_published >= datetime('now', '-{} days')
+                ORDER BY s.date_published DESC
+            """.format(days))
+            rows = cursor.fetchall()
+            return [self._row_to_sens_announcement(row) for row in rows]
+
+    def get_watchlist_summaries(self) -> List[Dict[str, Any]]:
+        """Get the latest AI summary for each watchlist company."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT c.name, c.jse_code, s.title, s.ai_summary,
+                       s.date_published, s.sens_number, s.is_urgent
+                FROM companies c
+                LEFT JOIN sens_announcements s ON (
+                    LOWER(s.company_name) LIKE LOWER('%' || c.name || '%') OR
+                    LOWER(s.company_name) LIKE LOWER('%' || c.jse_code || '%') OR
+                    LOWER(c.name) LIKE LOWER('%' || s.company_name || '%')
+                )
+                WHERE c.active_status = TRUE
+                  AND s.ai_summary IS NOT NULL AND s.ai_summary != ''
+                  AND s.id = (
+                      SELECT s2.id FROM sens_announcements s2
+                      WHERE (
+                          LOWER(s2.company_name) LIKE LOWER('%' || c.name || '%') OR
+                          LOWER(s2.company_name) LIKE LOWER('%' || c.jse_code || '%') OR
+                          LOWER(c.name) LIKE LOWER('%' || s2.company_name || '%')
+                      )
+                      AND s2.ai_summary IS NOT NULL AND s2.ai_summary != ''
+                      ORDER BY s2.date_published DESC
+                      LIMIT 1
+                  )
+                ORDER BY s.date_published DESC
+            """)
+            rows = cursor.fetchall()
+            return [{
+                'company_name': row['name'],
+                'jse_code': row['jse_code'],
+                'title': row['title'],
+                'ai_summary': row['ai_summary'],
+                'date_published': row['date_published'],
+                'sens_number': row['sens_number'],
+                'is_urgent': bool(row['is_urgent']),
+            } for row in rows]
+
+    def get_today_sens(self) -> List[SensAnnouncement]:
+        """Get all SENS announcements from today."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM sens_announcements
+                WHERE date(date_published) = date('now')
+                ORDER BY date_published DESC
+            """)
+            rows = cursor.fetchall()
+            return [self._row_to_sens_announcement(row) for row in rows]
