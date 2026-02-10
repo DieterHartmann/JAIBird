@@ -1,0 +1,28 @@
+services:
+  scheduler:
+    build: .
+    container_name: jaibird-scheduler
+    command: python main.py scheduler
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    mem_limit: 1536m
+    restart: unless-stopped
+    environment:
+      - CHROME_BIN=/usr/bin/chromium
+      - CHROMEDRIVER_PATH=/usr/bin/chromedriver
+      - TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
+
+  web:
+    build: .
+    container_name: jaibird-web
+    command: python main.py web
+    ports:
+      - "5055:5000"
+    volumes:
+      - ./data:/app/data
+      - ./.env:/app/.env:ro
+    mem_limit: 256m
+    restart: unless-stopped
+    depends_on:
+      - scheduler

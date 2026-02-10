@@ -33,6 +33,10 @@ class PDFParser:
     def __init__(self):
         self.config = get_config()
         self._setup_ai_clients()
+        # Token usage tracking
+        self.total_input_tokens = 0
+        self.total_output_tokens = 0
+        self.total_api_calls = 0
     
     def _setup_ai_clients(self):
         """Initialize AI API clients based on configuration."""
@@ -331,6 +335,7 @@ class PDFParser:
                     max_tokens=2000,
                     temperature=0.1
                 )
+                self._track_openai_usage(response)
                 return response.choices[0].message.content.strip()
                 
             elif self.config.pdf_parse_provider == "anthropic":
@@ -342,6 +347,7 @@ class PDFParser:
                         {"role": "user", "content": prompt}
                     ]
                 )
+                self._track_anthropic_usage(response)
                 return response.content[0].text.strip()
                 
         except Exception as e:
@@ -395,6 +401,7 @@ Please return only the cleaned text without any explanations or comments.
                     max_tokens=250,
                     temperature=0.1
                 )
+                self._track_openai_usage(response)
                 return response.choices[0].message.content.strip()
                 
             elif self.config.summary_provider == "anthropic":
@@ -406,6 +413,7 @@ Please return only the cleaned text without any explanations or comments.
                         {"role": "user", "content": prompt}
                     ]
                 )
+                self._track_anthropic_usage(response)
                 return response.content[0].text.strip()
                 
         except Exception as e:
@@ -443,6 +451,37 @@ Text:
         elif self.config.summary_provider == "anthropic":
             return self.summary_anthropic_client is not None and self.config.get_summary_anthropic_key()
         return False
+    
+    def _track_openai_usage(self, response):
+        """Track token usage from an OpenAI response."""
+        self.total_api_calls += 1
+        if hasattr(response, 'usage') and response.usage:
+            self.total_input_tokens += response.usage.prompt_tokens
+            self.total_output_tokens += response.usage.completion_tokens
+    
+    def _track_anthropic_usage(self, response):
+        """Track token usage from an Anthropic response."""
+        self.total_api_calls += 1
+        if hasattr(response, 'usage') and response.usage:
+            self.total_input_tokens += response.usage.input_tokens
+            self.total_output_tokens += response.usage.output_tokens
+    
+    def get_usage_summary(self) -> dict:
+        """Return token usage stats and estimated cost."""
+        # GPT-4o-mini pricing
+        openai_input_rate = 0.15 / 1_000_000   # $0.15 per 1M tokens
+        openai_output_rate = 0.60 / 1_000_000   # $0.60 per 1M tokens
+        
+        est_cost = (self.total_input_tokens * openai_input_rate +
+                    self.total_output_tokens * openai_output_rate)
+        
+        return {
+            "api_calls": self.total_api_calls,
+            "input_tokens": self.total_input_tokens,
+            "output_tokens": self.total_output_tokens,
+            "total_tokens": self.total_input_tokens + self.total_output_tokens,
+            "estimated_cost_usd": est_cost,
+        }
 
 
 def parse_sens_announcement(announcement: SensAnnouncement) -> SensAnnouncement:

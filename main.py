@@ -226,6 +226,45 @@ def main():
             announcements = run_initial_scrape()
             print(f"Initial scrape completed: {len(announcements)} announcements")
             
+            # Parse PDFs and generate AI summaries for all new announcements
+            if announcements:
+                from src.ai.pdf_parser import PDFParser
+                import time as _time
+                
+                print(f"\nParsing {len(announcements)} PDFs and generating AI summaries...")
+                parser = PDFParser()  # Shared instance to track totals
+                db_manager = DatabaseManager(config.database_path)
+                success_count = 0
+                start_time = _time.time()
+                
+                for i, announcement in enumerate(announcements, 1):
+                    try:
+                        print(f"  [{i}/{len(announcements)}] {announcement.company_name} - {announcement.title[:50]}...")
+                        parsed = parser.parse_sens_pdf(announcement)
+                        if parsed.ai_summary:
+                            db_manager.update_sens_parsing(parsed)
+                            success_count += 1
+                    except Exception as e:
+                        logger.error(f"PDF parsing failed for SENS {announcement.sens_number}: {e}")
+                
+                elapsed = _time.time() - start_time
+                stats = parser.get_usage_summary()
+                
+                print(f"\n{'='*60}")
+                print(f"INITIAL SCRAPE COMPLETE")
+                print(f"{'='*60}")
+                print(f"  Announcements scraped:  {len(announcements)}")
+                print(f"  Successfully parsed:    {success_count}/{len(announcements)}")
+                print(f"  API calls made:         {stats['api_calls']}")
+                print(f"  Input tokens:           {stats['input_tokens']:,}")
+                print(f"  Output tokens:          {stats['output_tokens']:,}")
+                print(f"  Total tokens:           {stats['total_tokens']:,}")
+                print(f"  Estimated cost:         ${stats['estimated_cost_usd']:.4f}")
+                print(f"  Time elapsed:           {elapsed:.1f}s")
+                print(f"  Monthly projection:     ~{len(announcements) / 30 * 22:.0f} announcements/month")
+                print(f"  Projected monthly cost: ${stats['estimated_cost_usd'] / 30 * 22:.4f}")
+                print(f"{'='*60}")
+            
         elif args.command == 'digest':
             logger.info("Sending daily digest...")
             db_manager = DatabaseManager(config.database_path)

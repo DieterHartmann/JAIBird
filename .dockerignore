@@ -1,0 +1,18 @@
+.git
+.gitignore
+.env
+*.md
+*.code-workspace
+__pycache__
+*.pyc
+*.pyo
+data/sens_pdfs/
+data/*.db
+logs/
+.vscode/
+.idea/
+debug_*.py
+test_*.py
+scripts/
+*.bat
+jaibird dirty little secrets.docx

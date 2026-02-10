@@ -338,7 +338,6 @@ class DatabaseManager:
                 SELECT * FROM sens_announcements 
                 WHERE parse_status = 'pending' AND local_pdf_path != ''
                 ORDER BY date_published DESC
-                LIMIT 10
             """)
             rows = cursor.fetchall()
             return [self._row_to_sens_announcement(row) for row in rows]

@@ -111,65 +111,124 @@ class SensScraper:
         chrome_options.add_experimental_option("prefs", prefs)
         
         try:
-            # Bypass WebDriverManager and download ChromeDriver manually for 64-bit
             import os
-            import requests
-            import zipfile
-            import tempfile
+            import platform
             from pathlib import Path
             
-            # First try to find Chrome manually
-            chrome_paths = [
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-            ]
+            is_linux = platform.system() == "Linux"
             
-            chrome_path = None
-            for path in chrome_paths:
-                if os.path.exists(path):
-                    chrome_path = path
-                    break
-            
-            if chrome_path:
-                chrome_options.binary_location = chrome_path
-                logger.info(f"Using Chrome from: {chrome_path}")
-            
-            # Manual ChromeDriver download for 64-bit Windows
-            driver_dir = Path.home() / ".jaibird_drivers"
-            driver_dir.mkdir(exist_ok=True)
-            driver_path = driver_dir / "chromedriver.exe"
-            
-            # Download if not exists or force refresh
-            if not driver_path.exists():
-                logger.info("Downloading 64-bit ChromeDriver manually...")
-                chrome_version = "140.0.7339.82"  # Match your Chrome version
-                download_url = f"https://storage.googleapis.com/chrome-for-testing-public/{chrome_version}/win64/chromedriver-win64.zip"
+            if is_linux:
+                # Linux / Docker / Raspberry Pi: use system-installed Chromium
+                chrome_bin = os.environ.get('CHROME_BIN', '/usr/bin/chromium')
+                chromedriver_path = os.environ.get('CHROMEDRIVER_PATH', '/usr/bin/chromedriver')
                 
-                with tempfile.TemporaryDirectory() as temp_dir:
-                    zip_path = Path(temp_dir) / "chromedriver.zip"
+                # Chromium might also be installed as chromium-browser
+                if not os.path.exists(chrome_bin):
+                    for alt in ['/usr/bin/chromium-browser', '/usr/bin/google-chrome']:
+                        if os.path.exists(alt):
+                            chrome_bin = alt
+                            break
+                
+                if not os.path.exists(chromedriver_path):
+                    for alt in ['/usr/lib/chromium/chromedriver', '/usr/lib/chromium-browser/chromedriver']:
+                        if os.path.exists(alt):
+                            chromedriver_path = alt
+                            break
+                
+                chrome_options.binary_location = chrome_bin
+                logger.info(f"Using Chromium from: {chrome_bin}")
+                
+                service = webdriver.chrome.service.Service(chromedriver_path)
+            else:
+                # Windows: auto-detect Chrome version and download matching ChromeDriver
+                import requests
+                import zipfile
+                import tempfile
+                
+                chrome_paths = [
+                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+                ]
+                
+                chrome_path = None
+                for path in chrome_paths:
+                    if os.path.exists(path):
+                        chrome_path = path
+                        break
+                
+                if chrome_path:
+                    chrome_options.binary_location = chrome_path
+                    logger.info(f"Using Chrome from: {chrome_path}")
+                
+                driver_dir = Path.home() / ".jaibird_drivers"
+                driver_dir.mkdir(exist_ok=True)
+                driver_path = driver_dir / "chromedriver.exe"
+                version_file = driver_dir / "chromedriver_version.txt"
+                
+                # Detect installed Chrome version
+                chrome_major_version = None
+                if chrome_path:
+                    try:
+                        import subprocess
+                        result = subprocess.run(
+                            ['powershell', '-command', f'(Get-Item "{chrome_path}").VersionInfo.FileVersion'],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        if result.returncode == 0 and result.stdout.strip():
+                            detected_version = result.stdout.strip()
+                            chrome_major_version = detected_version.split('.')[0]
+                            logger.info(f"Detected Chrome version: {detected_version} (major: {chrome_major_version})")
+                    except Exception as ver_err:
+                        logger.warning(f"Could not detect Chrome version: {ver_err}")
+                
+                # Check if cached driver matches current Chrome version
+                need_download = not driver_path.exists()
+                if not need_download and chrome_major_version and version_file.exists():
+                    cached_major = version_file.read_text().strip().split('.')[0]
+                    if cached_major != chrome_major_version:
+                        logger.info(f"Chrome updated ({cached_major} -> {chrome_major_version}), refreshing ChromeDriver")
+                        driver_path.unlink(missing_ok=True)
+                        need_download = True
+                
+                if need_download:
+                    logger.info("Downloading matching 64-bit ChromeDriver...")
                     
-                    # Download the zip file
-                    response = requests.get(download_url)
-                    response.raise_for_status()
-                    
-                    with open(zip_path, 'wb') as f:
-                        f.write(response.content)
-                    
-                    # Extract the exe
-                    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                        zip_ref.extractall(temp_dir)
-                    
-                    # Find and copy chromedriver.exe
-                    extracted_driver = Path(temp_dir) / "chromedriver-win64" / "chromedriver.exe"
-                    if extracted_driver.exists():
-                        import shutil
-                        shutil.copy2(extracted_driver, driver_path)
-                        logger.info(f"ChromeDriver downloaded to: {driver_path}")
+                    if chrome_major_version:
+                        version_lookup_url = f"https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_{chrome_major_version}"
+                        ver_response = requests.get(version_lookup_url, timeout=15)
+                        ver_response.raise_for_status()
+                        chrome_version = ver_response.text.strip()
                     else:
-                        raise Exception("Failed to extract chromedriver.exe")
+                        ver_response = requests.get("https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_STABLE", timeout=15)
+                        ver_response.raise_for_status()
+                        chrome_version = ver_response.text.strip()
+                    
+                    logger.info(f"Downloading ChromeDriver {chrome_version}")
+                    download_url = f"https://storage.googleapis.com/chrome-for-testing-public/{chrome_version}/win64/chromedriver-win64.zip"
+                    
+                    with tempfile.TemporaryDirectory() as temp_dir:
+                        zip_path = Path(temp_dir) / "chromedriver.zip"
+                        
+                        response = requests.get(download_url, timeout=60)
+                        response.raise_for_status()
+                        
+                        with open(zip_path, 'wb') as f:
+                            f.write(response.content)
+                        
+                        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                            zip_ref.extractall(temp_dir)
+                        
+                        extracted_driver = Path(temp_dir) / "chromedriver-win64" / "chromedriver.exe"
+                        if extracted_driver.exists():
+                            import shutil
+                            shutil.copy2(extracted_driver, driver_path)
+                            version_file.write_text(chrome_version)
+                            logger.info(f"ChromeDriver {chrome_version} downloaded to: {driver_path}")
+                        else:
+                            raise Exception("Failed to extract chromedriver.exe")
+                
+                service = webdriver.chrome.service.Service(str(driver_path))
             
-            # Use the manually downloaded driver
-            service = webdriver.chrome.service.Service(str(driver_path))
             self.driver = webdriver.Chrome(service=service, options=chrome_options)
             self.driver.set_page_load_timeout(self.config.webdriver_timeout)
             logger.info("Chrome WebDriver initialized successfully")
@@ -526,8 +585,50 @@ class SensScraper:
         
         return announcements
     
+    def _find_and_click_next_page(self) -> bool:
+        """Find and click the next page button in JSE pagination.
+        
+        Returns:
+            True if next page was clicked, False if no more pages.
+        """
+        try:
+            # Look for common pagination patterns on the JSE site
+            next_selectors = [
+                "//a[contains(@class, 'next')]",
+                "//a[contains(text(), 'Next')]",
+                "//a[contains(text(), '›')]",
+                "//a[contains(text(), '»')]",
+                "//li[contains(@class, 'next')]/a",
+                "//a[contains(@class, 'pager-next')]",
+                "//input[contains(@value, 'Next')]",
+                "//a[contains(@title, 'Next')]",
+                "//a[contains(@aria-label, 'Next')]",
+                # JSE-specific: look for numbered page links after current active page
+                "//span[contains(@class, 'current')]/following-sibling::a[1]",
+                "//li[contains(@class, 'active')]/following-sibling::li/a",
+            ]
+            
+            for selector in next_selectors:
+                try:
+                    elements = self.driver.find_elements(By.XPATH, selector)
+                    for element in elements:
+                        if element.is_displayed() and element.is_enabled():
+                            self.driver.execute_script("arguments[0].scrollIntoView(true);", element)
+                            time.sleep(1)
+                            element.click()
+                            logger.info(f"Clicked next page button (selector: {selector})")
+                            return True
+                except Exception:
+                    continue
+            
+            return False
+            
+        except Exception as e:
+            logger.debug(f"Error finding next page: {e}")
+            return False
+    
     def scrape_initial_30_days(self) -> List[SensAnnouncement]:
-        """Perform initial scrape of last 30 days of SENS announcements."""
+        """Perform initial scrape of last 30 days of SENS announcements with pagination."""
         logger.info("Starting initial 30-day SENS scrape")
         
         try:
@@ -545,29 +646,51 @@ class SensScraper:
             else:
                 logger.warning("Could not click 'Last 30 days' button, proceeding with default view")
             
-            # Scrape announcements
-            announcements = self._scrape_announcements_from_page()
+            # Scrape all pages
+            all_announcements = []
+            page_num = 1
+            max_pages = 200  # Safety limit to avoid infinite loops
+            
+            while page_num <= max_pages:
+                logger.info(f"Scraping page {page_num}...")
+                page_announcements = self._scrape_announcements_from_page()
+                
+                if not page_announcements:
+                    logger.info(f"No announcements found on page {page_num}, stopping pagination")
+                    break
+                
+                all_announcements.extend(page_announcements)
+                logger.info(f"Page {page_num}: found {len(page_announcements)} announcements (total: {len(all_announcements)})")
+                
+                # Try to go to next page
+                if not self._find_and_click_next_page():
+                    logger.info(f"No more pages after page {page_num}")
+                    break
+                
+                # Wait for next page to load
+                time.sleep(10)
+                page_num += 1
             
             # Save to database
             saved_count = 0
-            for announcement in announcements:
+            for announcement in all_announcements:
                 try:
                     self.db_manager.add_sens_announcement(announcement)
                     saved_count += 1
                 except Exception as e:
                     logger.error(f"Failed to save announcement {announcement.sens_number}: {e}")
             
-            logger.info(f"Initial scrape completed: {saved_count} new announcements saved")
+            logger.info(f"Initial scrape completed: {saved_count} new announcements saved across {page_num} pages")
             
             # Create/update Excel spreadsheet with all announcements
-            if announcements:
+            if all_announcements:
                 try:
-                    excel_path = self.excel_manager.create_or_update_spreadsheet(announcements)
+                    excel_path = self.excel_manager.create_or_update_spreadsheet(all_announcements)
                     logger.info(f"Excel spreadsheet created/updated: {excel_path}")
                 except Exception as e:
                     logger.error(f"Failed to create Excel spreadsheet: {e}")
             
-            return announcements
+            return all_announcements
             
         except Exception as e:
             logger.error(f"Error during initial 30-day scrape: {e}")
