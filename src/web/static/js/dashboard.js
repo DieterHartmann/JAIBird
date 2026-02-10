@@ -438,8 +438,11 @@ function renderHighlights() {
         return m[cat] || 'bg-dark';
     };
 
-    // Store summaries in a JS array to avoid attribute-escaping issues
-    _tooltipData.highlights = data.map(item => item.ai_summary || '');
+    // Store tooltip text in a JS array to avoid attribute-escaping issues.
+    // Fall back to the full title if no AI summary is available.
+    _tooltipData.highlights = data.map(item =>
+        item.ai_summary ? `AI Summary: ${item.ai_summary}` : item.title || ''
+    );
 
     tbody.innerHTML = data.map((item, idx) => {
         const dt = item.date_published ? new Date(item.date_published).toLocaleDateString('en-ZA', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '—';
@@ -505,7 +508,11 @@ function renderEvents() {
         };
 
         // Store tooltip data and pdf urls for events
-        _tooltipData.events = events.map(e => e.ai_summary || e.title || '');
+        _tooltipData.events = events.map(e => {
+            let tip = e.ai_summary ? `AI Summary: ${e.ai_summary}` : (e.title || '');
+            if (e.pdf_url) tip += tip ? '\n\nDouble-click to open PDF' : 'Double-click to open PDF';
+            return tip;
+        });
         _tooltipData.eventPdfUrls = events.map(e => e.pdf_url || '');
 
         body.innerHTML = events.map((e, idx) => {
