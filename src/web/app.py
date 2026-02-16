@@ -5,6 +5,7 @@ Provides web interface for managing watchlist and viewing SENS announcements.
 
 import logging
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 from flask_wtf import FlaskForm
@@ -182,65 +183,32 @@ def create_app():
     
     @app.route('/api/scrape', methods=['POST'])
     def api_scrape():
-        """API endpoint to trigger SENS scraping with AI parsing and notifications."""
+        """Queue a SENS scrape via the scheduler container.
+
+        The web container only has 256 MB – far too little to launch
+        Chromium.  Instead we write a trigger file into the shared
+        data/ volume.  The scheduler container polls for this file and
+        executes the heavy scrape in its own 1.5 GB memory space.
+        """
+        import json
+        trigger_path = Path('data/scrape_trigger.json')
         try:
-            from ..ai.pdf_parser import parse_sens_announcement
-            from ..utils.dropbox_manager import DropboxManager
-
-            scraper = SensScraper(db_manager)
-            announcements = scraper.scrape_daily_announcements()
-
-            dropbox_manager = DropboxManager()
-            # Company enrichment
-            from ..company.enricher import CompanyEnricher
-            from ..company.company_db import CompanyDB
-            enricher = CompanyEnricher(CompanyDB())
-            processed = 0
-
-            # Process AI parsing, upload, and notifications for new announcements
-            for announcement in announcements:
-                try:
-                    # Parse PDF and generate AI summary for ALL new announcements
-                    parsed = parse_sens_announcement(announcement)
-                    if getattr(parsed, 'ai_summary', None):
-                        # Persist parsing results via model-aware helper
-                        announcement.pdf_content = getattr(parsed, 'pdf_content', '')
-                        announcement.ai_summary = parsed.ai_summary
-                        announcement.parse_method = getattr(parsed, 'parse_method', '')
-                        announcement.parse_status = getattr(parsed, 'parse_status', 'completed')
-                        announcement.parsed_at = getattr(parsed, 'parsed_at', None)
-                        db_manager.update_sens_parsing(announcement)
-
-                    # Upload to Dropbox if available
-                    if announcement.local_pdf_path:
-                        dropbox_path = dropbox_manager.upload_pdf(
-                            announcement.local_pdf_path,
-                            announcement.sens_number,
-                            announcement.company_name
-                        )
-                        if dropbox_path:
-                            announcement.dropbox_pdf_path = dropbox_path
-
-                    # Send notifications
-                    notification_manager.process_new_announcement(announcement)
-
-                    # Enrich company intelligence DB
-                    enricher.enrich_from_announcement(announcement)
-                    processed += 1
-                except Exception as inner_e:
-                    logger.error(f"Failed to process new announcement {announcement.sens_number}: {inner_e}")
-
+            trigger_path.write_text(json.dumps({
+                'requested_at': datetime.now().isoformat(),
+                'source': 'web_dashboard',
+            }))
+            logger.info("Scrape trigger file written – scheduler will pick it up shortly")
             return jsonify({
                 'status': 'success',
-                'message': f'Successfully scraped {len(announcements)} new announcements',
-                'count': len(announcements),
-                'processed': processed
+                'message': 'Scrape queued – the scheduler will run it within 30 seconds. '
+                           'New announcements will appear on the dashboard automatically.',
+                'count': 0,
             })
         except Exception as e:
-            logger.error(f"API scrape error: {e}")
+            logger.error(f"Failed to write scrape trigger: {e}")
             return jsonify({
                 'status': 'error',
-                'message': str(e)
+                'message': str(e),
             }), 500
     
     @app.route('/api/test_notifications', methods=['POST'])

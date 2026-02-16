@@ -125,22 +125,22 @@ function getCSRFToken() {
     return '';
 }
 
-// Trigger SENS scraping
+// Trigger SENS scraping (queued via scheduler container)
 async function triggerScrape() {
-    showLoading('Scraping SENS announcements...');
+    showLoading('Queuing SENS scrape...');
     
     try {
         const result = await apiCall('/api/scrape');
         hideLoading();
         
         if (result.status === 'success') {
-            showToast(`Successfully scraped ${result.count} new announcements!`, 'success');
-            // Refresh page after 2 seconds to show new data
+            showToast(result.message || 'Scrape queued – new announcements will appear shortly.', 'success');
+            // Refresh page after 45 seconds to give the scheduler time
             setTimeout(() => {
                 window.location.reload();
-            }, 2000);
+            }, 45000);
         } else {
-            showToast('Scraping completed but no new announcements found.', 'info');
+            showToast('Failed to queue scrape.', 'danger');
         }
     } catch (error) {
         hideLoading();

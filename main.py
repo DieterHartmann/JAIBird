@@ -115,6 +115,17 @@ class JAIBirdScheduler:
         except Exception as e:
             logger.error(f"File cleanup failed: {e}")
     
+    def check_scrape_trigger(self):
+        """Check for a scrape trigger file written by the web container."""
+        trigger_path = os.path.join('data', 'scrape_trigger.json')
+        if os.path.exists(trigger_path):
+            try:
+                os.remove(trigger_path)
+                logger.info("Scrape trigger detected from web dashboard – running scrape now")
+                self.scheduled_scrape()
+            except Exception as e:
+                logger.error(f"Error handling scrape trigger: {e}")
+
     def run_scheduler(self):
         """Run the scheduler in a loop."""
         self.running = True
@@ -122,7 +133,8 @@ class JAIBirdScheduler:
         
         while self.running:
             schedule.run_pending()
-            time.sleep(60)  # Check every minute
+            self.check_scrape_trigger()
+            time.sleep(30)  # Check every 30 seconds (trigger file + schedule)
         
         logger.info("JAIBird scheduler stopped")
     
