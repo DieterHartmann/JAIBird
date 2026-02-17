@@ -35,6 +35,7 @@ from ..analytics.sens_categorizer import (
     get_upcoming_events,
     get_sector_breakdown,
 )
+from ..services.price_service import PriceService
 
 
 logger = logging.getLogger(__name__)
@@ -497,9 +498,70 @@ def create_app():
             result['sector_breakdown'] = _safe('sectors', lambda:
                 get_sector_breakdown(categorised, exclude_noise=True), [])
 
+            # Stock price data
+            result['price_movers'] = _safe('price_movers', lambda:
+                price_service.get_movers(n=5), {'gainers': [], 'losers': []})
+            result['price_momentum'] = _safe('price_momentum', lambda:
+                price_service.get_momentum_report(), [])
+
             return jsonify({'status': 'success', 'data': result})
         except Exception as e:
             logger.error(f"Dashboard full error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    # ====================================================================
+    # STOCK PRICE API ENDPOINTS
+    # ====================================================================
+
+    price_service = PriceService(db_manager)
+
+    @app.route('/api/prices')
+    def api_prices():
+        """Full latest snapshot of all tracked stock prices."""
+        try:
+            snapshot = price_service.get_snapshot()
+            return jsonify({'status': 'success', 'data': snapshot, 'count': len(snapshot)})
+        except Exception as e:
+            logger.error(f"Prices API error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/prices/<ticker>')
+    def api_price_single(ticker):
+        """Latest price + 24h history for a single ticker."""
+        try:
+            ticker = ticker.upper()
+            history = db_manager.get_price_history(ticker, hours=24)
+            if not history:
+                return jsonify({'status': 'error', 'message': f'No data for {ticker}'}), 404
+            return jsonify({
+                'status': 'success',
+                'ticker': ticker,
+                'latest': history[0],
+                'history': history,
+            })
+        except Exception as e:
+            logger.error(f"Price single API error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/prices/movers')
+    def api_price_movers():
+        """Top gainers and losers by daily change %."""
+        try:
+            n = request.args.get('n', 5, type=int)
+            movers = price_service.get_movers(n=n)
+            return jsonify({'status': 'success', 'data': movers})
+        except Exception as e:
+            logger.error(f"Price movers API error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/prices/momentum')
+    def api_price_momentum():
+        """Stocks on the hot-list with price change since their SENS trigger."""
+        try:
+            report = price_service.get_momentum_report()
+            return jsonify({'status': 'success', 'data': report})
+        except Exception as e:
+            logger.error(f"Price momentum API error: {e}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
     # Error handlers

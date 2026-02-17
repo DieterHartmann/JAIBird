@@ -5,7 +5,7 @@ Defines the schema for companies, SENS announcements, notifications, and configu
 
 import sqlite3
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
@@ -158,6 +158,34 @@ class DatabaseManager:
                     last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+
+            # Create stock_prices table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS stock_prices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    price REAL,
+                    change_pct REAL,
+                    volume INTEGER,
+                    market_cap REAL,
+                    day_high REAL,
+                    day_low REAL,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    source TEXT DEFAULT 'yahoo'
+                )
+            """)
+
+            # Create price_hot_list table (SENS-triggered momentum tracking)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS price_hot_list (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ticker TEXT NOT NULL,
+                    sens_id INTEGER,
+                    triggered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    expires_at TIMESTAMP,
+                    FOREIGN KEY (sens_id) REFERENCES sens_announcements(id)
+                )
+            """)
             
             # Create indexes for better performance
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_sens_number ON sens_announcements(sens_number)")
@@ -167,6 +195,10 @@ class DatabaseManager:
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_is_urgent ON sens_announcements(is_urgent)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_jse_code ON companies(jse_code)")
             cursor.execute("CREATE INDEX IF NOT EXISTS idx_active_status ON companies(active_status)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_prices_ticker ON stock_prices(ticker)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_prices_timestamp ON stock_prices(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_prices_ticker_ts ON stock_prices(ticker, timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_hotlist_expires ON price_hot_list(expires_at)")
             
             logger.info("Database initialized successfully")
     
@@ -664,3 +696,104 @@ class DatabaseManager:
                 """)
             return [{'company_name': row['company_name'], 'ai_summary': row['ai_summary']}
                     for row in cursor.fetchall()]
+
+    # ============================================================================
+    # STOCK PRICE OPERATIONS
+    # ============================================================================
+
+    def add_stock_price(self, ticker: str, price: float,
+                        change_pct: Optional[float] = None,
+                        volume: Optional[int] = None,
+                        market_cap: Optional[float] = None,
+                        day_high: Optional[float] = None,
+                        day_low: Optional[float] = None,
+                        source: str = "yahoo") -> int:
+        """Store a price snapshot for a ticker."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO stock_prices
+                    (ticker, price, change_pct, volume, market_cap, day_high, day_low, source)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (ticker, price, change_pct, volume, market_cap, day_high, day_low, source))
+            return cursor.lastrowid
+
+    def get_latest_prices(self) -> List[Dict[str, Any]]:
+        """Return the most recent price record for every tracked ticker."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT sp.*
+                FROM stock_prices sp
+                INNER JOIN (
+                    SELECT ticker, MAX(id) AS max_id
+                    FROM stock_prices
+                    GROUP BY ticker
+                ) latest ON sp.id = latest.max_id
+                ORDER BY sp.ticker
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_price_history(self, ticker: str, hours: int = 24) -> List[Dict[str, Any]]:
+        """Return price records for a ticker within the last N hours, newest first."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT * FROM stock_prices
+                WHERE ticker = ? AND timestamp >= datetime('now', '-{} hours')
+                ORDER BY timestamp DESC
+            """.format(int(hours)), (ticker,))
+            return [dict(row) for row in cursor.fetchall()]
+
+    def add_hot_ticker(self, ticker: str, sens_id: Optional[int] = None,
+                       duration_minutes: int = 60) -> int:
+        """Add a ticker to the hot list for momentum tracking after a SENS event."""
+        expires_at = datetime.now() + timedelta(minutes=duration_minutes)
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO price_hot_list (ticker, sens_id, expires_at)
+                VALUES (?, ?, ?)
+            """, (ticker, sens_id, expires_at.isoformat()))
+            logger.info(f"Hot-list: added {ticker} (expires {expires_at:%H:%M})")
+            return cursor.lastrowid
+
+    def get_active_hot_tickers(self) -> List[str]:
+        """Return distinct tickers currently on the hot list (not expired)."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT ticker FROM price_hot_list
+                WHERE expires_at > datetime('now')
+            """)
+            return [row['ticker'] for row in cursor.fetchall()]
+
+    def get_active_hot_entries(self) -> List[Dict[str, Any]]:
+        """Return full hot-list entries that haven't expired."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT ticker, sens_id, triggered_at, expires_at
+                FROM price_hot_list
+                WHERE expires_at > datetime('now')
+                ORDER BY triggered_at DESC
+            """)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def cleanup_old_prices(self, days: int = 90) -> int:
+        """Delete price records older than N days. Returns rows deleted."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM stock_prices
+                WHERE timestamp < datetime('now', '-{} days')
+            """.format(int(days)))
+            deleted = cursor.rowcount
+            if deleted:
+                logger.info(f"Cleaned up {deleted} price records older than {days} days")
+            # Also purge expired hot-list entries
+            cursor.execute("""
+                DELETE FROM price_hot_list
+                WHERE expires_at < datetime('now', '-1 day')
+            """)
+            return deleted

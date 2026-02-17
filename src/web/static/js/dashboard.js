@@ -84,6 +84,7 @@ function renderAll() {
         renderVolume, renderNoiseDoughnut, renderSectorChart, renderHighlights,
         renderHeatmap, renderDirectorSignal, renderUnusualAlerts,
         renderWatchlistPulse, renderSentiment, renderSummaryCards, renderEvents,
+        renderMarketMovers, renderMomentum,
     ];
     widgets.forEach(fn => { try { fn(); } catch(e) { console.warn('Widget render error:', fn.name, e); } });
 }
@@ -589,6 +590,95 @@ function renderHeatmap() {
 }
 
 // ---------------------------------------------------------------------------
+// Market Movers (Gainers & Losers)
+// ---------------------------------------------------------------------------
+function renderMarketMovers() {
+    const movers = dashData.price_movers || { gainers: [], losers: [] };
+    const gainersEl = document.getElementById('gainersBody');
+    const losersEl = document.getElementById('losersBody');
+    const updatedEl = document.getElementById('priceLastUpdated');
+
+    if (gainersEl) {
+        if (!movers.gainers.length) {
+            gainersEl.innerHTML = '<div class="text-center text-muted py-2">No price data yet</div>';
+        } else {
+            gainersEl.innerHTML = movers.gainers.map(s => {
+                const pct = s.change_pct != null ? s.change_pct.toFixed(2) : '—';
+                const price = s.price != null ? formatZAR(s.price) : '—';
+                return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom">
+                    <div>
+                        <strong>${esc(s.ticker)}</strong>
+                        <span class="text-muted ms-1">${price}</span>
+                    </div>
+                    <span class="badge bg-success">+${pct}%</span>
+                </div>`;
+            }).join('');
+        }
+    }
+
+    if (losersEl) {
+        if (!movers.losers.length) {
+            losersEl.innerHTML = '<div class="text-center text-muted py-2">No price data yet</div>';
+        } else {
+            losersEl.innerHTML = movers.losers.map(s => {
+                const pct = s.change_pct != null ? s.change_pct.toFixed(2) : '—';
+                const price = s.price != null ? formatZAR(s.price) : '—';
+                return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom">
+                    <div>
+                        <strong>${esc(s.ticker)}</strong>
+                        <span class="text-muted ms-1">${price}</span>
+                    </div>
+                    <span class="badge bg-danger">${pct}%</span>
+                </div>`;
+            }).join('');
+        }
+    }
+
+    if (updatedEl) {
+        const allMovers = [...(movers.gainers || []), ...(movers.losers || [])];
+        if (allMovers.length && allMovers[0].timestamp) {
+            const ts = new Date(allMovers[0].timestamp);
+            updatedEl.textContent = 'Updated ' + ts.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SENS Momentum Tracker
+// ---------------------------------------------------------------------------
+function renderMomentum() {
+    const el = document.getElementById('momentumBody');
+    if (!el) return;
+    const items = dashData.price_momentum || [];
+
+    if (!items.length) {
+        el.innerHTML = '<div class="text-center text-muted py-4"><i class="bi bi-lightning fs-3"></i><p class="mt-2 mb-0">No active SENS momentum tracking</p><p class="text-muted" style="font-size:0.75rem;">Stocks are tracked for 1 hour after a SENS announcement</p></div>';
+        return;
+    }
+
+    el.innerHTML = `<div class="list-group list-group-flush">${items.map(m => {
+        const isUp = m.change_pct >= 0;
+        const arrow = isUp ? 'bi-arrow-up-right' : 'bi-arrow-down-right';
+        const colour = isUp ? 'text-success' : 'text-danger';
+        const bgColour = isUp ? 'bg-success' : 'bg-danger';
+        const pct = m.change_pct != null ? (isUp ? '+' : '') + m.change_pct.toFixed(2) + '%' : '—';
+        const triggeredAt = m.sens_triggered_at ? new Date(m.sens_triggered_at).toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' }) : '';
+        return `<div class="list-group-item px-3 py-2">
+            <div class="d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>${esc(m.ticker)}</strong>
+                    <span class="text-muted ms-2">R${m.current_price?.toFixed(2) || '—'}</span>
+                </div>
+                <div>
+                    <span class="badge ${bgColour}"><i class="bi ${arrow}"></i> ${pct}</span>
+                </div>
+            </div>
+            <small class="text-muted">Since SENS at ${triggeredAt} &mdash; Base: R${m.base_price?.toFixed(2) || '—'}</small>
+        </div>`;
+    }).join('')}</div>`;
+}
+
+// ---------------------------------------------------------------------------
 // Tooltip cleanup helper – dispose Bootstrap tooltips before re-rendering
 // ---------------------------------------------------------------------------
 function disposeTooltips(container) {
@@ -605,3 +695,4 @@ function disposeTooltips(container) {
 function trunc(t, n) { return !t ? '' : (t.length > n ? t.substring(0, n-1) + '\u2026' : t); }
 function fmtDate(s, b) { if (!s) return ''; if (b==='month') return s; const d = new Date(s+'T00:00:00'); return d.toLocaleDateString('en-ZA',{day:'2-digit',month:'short'}); }
 function esc(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+function formatZAR(v) { if (v == null) return '—'; return 'R' + Number(v).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }

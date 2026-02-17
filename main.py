@@ -26,6 +26,7 @@ from src.utils.excel_manager import ExcelManager
 from src.web.app import run_app
 from src.company.enricher import CompanyEnricher
 from src.company.company_db import CompanyDB
+from src.services.price_service import PriceService
 
 
 logger = logging.getLogger(__name__)
@@ -40,6 +41,7 @@ class JAIBirdScheduler:
         self.notification_manager = NotificationManager(self.db_manager)
         self.dropbox_manager = DropboxManager()
         self.scraper = SensScraper(self.db_manager)
+        self.price_service = PriceService(self.db_manager)
         self.running = False
     
     def setup_schedules(self):
@@ -52,10 +54,16 @@ class JAIBirdScheduler:
         
         # Schedule file cleanup daily at midnight
         schedule.every().day.at("00:00").do(self.cleanup_old_files)
+
+        # Stock price polling
+        schedule.every(15).minutes.do(self.fetch_all_prices)
+        schedule.every(2).minutes.do(self.fetch_hot_prices)
+        schedule.every().day.at("00:30").do(self.cleanup_old_prices)
         
         logger.info(f"Scheduled SENS scraping every {self.config.scrape_interval_minutes} minutes")
         logger.info(f"Scheduled daily digest at {self.config.daily_digest_time}")
         logger.info("Scheduled daily file cleanup at midnight")
+        logger.info("Scheduled stock price polling every 15 min (hot-list every 2 min)")
     
     def scheduled_scrape(self):
         """Perform scheduled SENS scraping."""
@@ -88,11 +96,52 @@ class JAIBirdScheduler:
                 
                 # Send notifications
                 self.notification_manager.process_new_announcement(announcement)
+
+                # Add company to price hot-list for momentum tracking
+                self._add_to_hot_list(announcement)
             
             logger.info(f"Scheduled scrape completed: {len(announcements)} new announcements")
             
         except Exception as e:
             logger.error(f"Scheduled scrape failed: {e}")
+
+    def _add_to_hot_list(self, announcement):
+        """Add a company to the price hot-list after a new SENS announcement."""
+        try:
+            company = self.db_manager.get_company_by_jse_code(
+                announcement.company_name.split()[-1] if announcement.company_name else ""
+            )
+            if company and company.jse_code:
+                self.db_manager.add_hot_ticker(
+                    ticker=company.jse_code,
+                    sens_id=announcement.id,
+                    duration_minutes=60,
+                )
+                return
+
+            # Fallback: check if company_name matches a watchlist company
+            companies = self.db_manager.get_all_companies(active_only=True)
+            for c in companies:
+                if (c.name and c.name.lower() in announcement.company_name.lower()) or \
+                   (c.jse_code and c.jse_code.lower() in announcement.company_name.lower()):
+                    self.db_manager.add_hot_ticker(
+                        ticker=c.jse_code,
+                        sens_id=announcement.id,
+                        duration_minutes=60,
+                    )
+                    return
+
+            # Also check if the ticker appears in our tracked list
+            for ticker in self.price_service.get_tickers():
+                if ticker.lower() in announcement.company_name.lower():
+                    self.db_manager.add_hot_ticker(
+                        ticker=ticker,
+                        sens_id=announcement.id,
+                        duration_minutes=60,
+                    )
+                    return
+        except Exception as e:
+            logger.debug(f"Could not add hot-list entry for {announcement.company_name}: {e}")
     
     def send_daily_digest(self):
         """Send daily digest email."""
@@ -114,6 +163,30 @@ class JAIBirdScheduler:
             logger.info("File cleanup completed")
         except Exception as e:
             logger.error(f"File cleanup failed: {e}")
+
+    def fetch_all_prices(self):
+        """Periodic bulk fetch of stock prices for all tracked tickers."""
+        try:
+            count = self.price_service.fetch_all_prices()
+            logger.info(f"Price fetch completed: {count} tickers updated")
+        except Exception as e:
+            logger.error(f"Price fetch failed: {e}")
+
+    def fetch_hot_prices(self):
+        """Frequent fetch of stock prices for SENS-triggered hot-list tickers."""
+        try:
+            self.price_service.fetch_hot_prices()
+        except Exception as e:
+            logger.error(f"Hot-list price fetch failed: {e}")
+
+    def cleanup_old_prices(self):
+        """Prune stock price history older than 90 days."""
+        try:
+            deleted = self.db_manager.cleanup_old_prices(days=90)
+            if deleted:
+                logger.info(f"Cleaned up {deleted} old price records")
+        except Exception as e:
+            logger.error(f"Price cleanup failed: {e}")
     
     def check_scrape_trigger(self):
         """Check for a scrape trigger file written by the web container."""
