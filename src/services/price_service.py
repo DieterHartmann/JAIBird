@@ -62,6 +62,16 @@ class PriceService:
     def _from_yahoo(yahoo_symbol: str) -> str:
         return yahoo_symbol.replace(".JO", "")
 
+    @staticmethod
+    def _zac_to_zar(cents_value: float) -> float:
+        """Convert Yahoo Finance ZAc (cents) to ZAR (rands).
+
+        Yahoo reports JSE prices in South African cents. We truncate to
+        whole cents (JSE never prices in fractions of a cent) and then
+        convert to rands for display.
+        """
+        return int(cents_value) / 100
+
     # ------------------------------------------------------------------
     # Bulk fetch (every 15 min)
     # ------------------------------------------------------------------
@@ -108,31 +118,34 @@ class PriceService:
                         continue
 
                     latest = ticker_df.iloc[-1]
-                    price = float(latest["Close"])
+                    raw_close = float(latest["Close"])
 
+                    # Change % calculated from raw cents (ratio is unit-agnostic)
                     prev_close = (
                         float(ticker_df["Close"].iloc[-2])
                         if len(ticker_df) >= 2
                         else None
                     )
                     change_pct = (
-                        round((price - prev_close) / prev_close * 100, 2)
+                        round((raw_close - prev_close) / prev_close * 100, 2)
                         if prev_close
                         else None
                     )
 
+                    # Convert ZAc (cents) -> ZAR (rands), drop fractional cents
+                    price = self._zac_to_zar(raw_close)
                     vol = (
                         int(latest["Volume"])
                         if not pd.isna(latest["Volume"])
                         else None
                     )
                     high = (
-                        float(latest["High"])
+                        self._zac_to_zar(float(latest["High"]))
                         if not pd.isna(latest["High"])
                         else None
                     )
                     low = (
-                        float(latest["Low"])
+                        self._zac_to_zar(float(latest["Low"]))
                         if not pd.isna(latest["Low"])
                         else None
                     )
@@ -201,19 +214,19 @@ class PriceService:
                         continue
 
                     latest = ticker_df.iloc[-1]
-                    price = float(latest["Close"])
+                    price = self._zac_to_zar(float(latest["Close"]))
                     vol = (
                         int(latest["Volume"])
                         if not pd.isna(latest["Volume"])
                         else None
                     )
                     high = (
-                        float(latest["High"])
+                        self._zac_to_zar(float(latest["High"]))
                         if not pd.isna(latest["High"])
                         else None
                     )
                     low = (
-                        float(latest["Low"])
+                        self._zac_to_zar(float(latest["Low"]))
                         if not pd.isna(latest["Low"])
                         else None
                     )
