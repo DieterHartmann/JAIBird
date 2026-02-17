@@ -94,6 +94,21 @@ def create_app():
             logger.error(f"Error loading watchlist: {e}")
             flash(f"Error loading watchlist: {e}", 'error')
             return render_template('watchlist.html', companies=[])
+
+    @app.route('/prices')
+    def prices_page():
+        """Stock prices page."""
+        try:
+            watchlist_codes = [
+                c.jse_code.upper()
+                for c in db_manager.get_all_companies(active_only=True)
+                if c.jse_code
+            ]
+            return render_template('prices.html', watchlist_codes=watchlist_codes)
+        except Exception as e:
+            logger.error(f"Error loading prices page: {e}")
+            flash(f"Error loading prices page: {e}", 'error')
+            return render_template('prices.html', watchlist_codes=[])
     
     @app.route('/add_company', methods=['GET', 'POST'])
     def add_company():

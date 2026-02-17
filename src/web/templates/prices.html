@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+
+{% block title %}Stock Prices - JAIBird{% endblock %}
+
+{% block content %}
+<div class="row mb-3">
+    <div class="col-12 d-flex justify-content-between align-items-center">
+        <div>
+            <h1 class="mb-0">
+                <i class="bi bi-currency-exchange"></i> JSE Stock Prices
+            </h1>
+            <small class="text-muted" id="pricesSubtitle">Loading prices&hellip;</small>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+            <button class="btn btn-sm btn-outline-primary" onclick="loadPrices()" title="Refresh">
+                <i class="bi bi-arrow-clockwise"></i>
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body py-2">
+                <div class="row g-2 align-items-center">
+                    <div class="col-md-5">
+                        <div class="input-group input-group-sm">
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <input type="text" class="form-control" id="priceSearch"
+                                   placeholder="Search ticker or company...">
+                            <button class="btn btn-outline-secondary" type="button" onclick="document.getElementById('priceSearch').value=''; filterTable();">
+                                <i class="bi bi-x"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="watchlistOnly">
+                            <label class="form-check-label small" for="watchlistOnly">
+                                <i class="bi bi-star-fill text-warning"></i> Watchlist only
+                            </label>
+                        </div>
+                    </div>
+                    <div class="col-md-4 text-end">
+                        <span class="badge bg-success me-1" id="countGainers">0 gainers</span>
+                        <span class="badge bg-danger me-1" id="countLosers">0 losers</span>
+                        <span class="badge bg-secondary" id="countTotal">0 stocks</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Prices Table -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover table-sm mb-0" id="pricesTable">
+                        <thead class="table-light">
+                            <tr>
+                                <th class="sortable" data-sort="ticker" style="cursor:pointer;">
+                                    Ticker <i class="bi bi-chevron-expand text-muted" style="font-size:0.7em;"></i>
+                                </th>
+                                <th class="sortable text-end" data-sort="price" style="cursor:pointer;">
+                                    Price <i class="bi bi-chevron-expand text-muted" style="font-size:0.7em;"></i>
+                                </th>
+                                <th class="sortable text-end" data-sort="change_pct" style="cursor:pointer;">
+                                    Change % <i class="bi bi-chevron-expand text-muted" style="font-size:0.7em;"></i>
+                                </th>
+                                <th class="text-end d-none d-md-table-cell">Day High</th>
+                                <th class="text-end d-none d-md-table-cell">Day Low</th>
+                                <th class="sortable text-end d-none d-lg-table-cell" data-sort="volume" style="cursor:pointer;">
+                                    Volume <i class="bi bi-chevron-expand text-muted" style="font-size:0.7em;"></i>
+                                </th>
+                                <th class="text-end d-none d-lg-table-cell">Updated</th>
+                            </tr>
+                        </thead>
+                        <tbody id="pricesBody">
+                            <tr>
+                                <td colspan="7" class="text-center text-muted py-5">
+                                    <div class="spinner-border spinner-border-sm me-2"></div>
+                                    Loading stock prices&hellip;
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Price History Modal -->
+<div class="modal fade" id="priceHistoryModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="historyModalTitle">Price History</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="row mb-3" id="historyKPIs"></div>
+                <div class="chart-container" style="position:relative;height:250px;">
+                    <canvas id="historyChart"></canvas>
+                </div>
+                <div class="mt-3">
+                    <h6 class="small text-muted">Recent Price Records</h6>
+                    <div class="table-responsive" style="max-height:200px;overflow-y:auto;">
+                        <table class="table table-sm table-striped mb-0">
+                            <thead class="table-light">
+                                <tr><th>Time</th><th class="text-end">Price</th><th class="text-end">Volume</th><th class="text-end">High</th><th class="text-end">Low</th></tr>
+                            </thead>
+                            <tbody id="historyTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const WATCHLIST_CODES = {{ watchlist_codes | tojson }};
+let allPrices = [];
+let currentSort = { key: 'ticker', asc: true };
+let historyChart = null;
+
+// -----------------------------------------------------------------------
+// Init
+// -----------------------------------------------------------------------
+document.addEventListener('DOMContentLoaded', () => {
+    loadPrices();
+    document.getElementById('priceSearch').addEventListener('input', filterTable);
+    document.getElementById('watchlistOnly').addEventListener('change', filterTable);
+
+    document.querySelectorAll('.sortable').forEach(th => {
+        th.addEventListener('click', () => {
+            const key = th.dataset.sort;
+            if (currentSort.key === key) {
+                currentSort.asc = !currentSort.asc;
+            } else {
+                currentSort.key = key;
+                currentSort.asc = key === 'ticker';
+            }
+            renderTable();
+        });
+    });
+
+    // Auto-refresh every 5 minutes
+    setInterval(loadPrices, 5 * 60 * 1000);
+});
+
+// -----------------------------------------------------------------------
+// Fetch data
+// -----------------------------------------------------------------------
+async function loadPrices() {
+    try {
+        const resp = await fetch('/api/prices');
+        const json = await resp.json();
+        if (json.status !== 'success') { console.error(json.message); return; }
+        allPrices = json.data || [];
+        renderTable();
+        updateSubtitle();
+    } catch (err) {
+        console.error('Failed to load prices:', err);
+        document.getElementById('pricesBody').innerHTML =
+            '<tr><td colspan="7" class="text-center text-danger py-4">Failed to load prices. The scheduler may not have fetched data yet.</td></tr>';
+        document.getElementById('pricesSubtitle').textContent = 'Unable to load prices';
+    }
+}
+
+function updateSubtitle() {
+    const sub = document.getElementById('pricesSubtitle');
+    if (!allPrices.length) {
+        sub.textContent = 'No price data yet \u2014 the scheduler fetches every 15 minutes';
+        return;
+    }
+    const ts = allPrices[0]?.timestamp;
+    if (ts) {
+        const d = new Date(ts);
+        sub.textContent = `${allPrices.length} stocks tracked \u2014 last updated ${d.toLocaleString('en-ZA', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' })}`;
+    } else {
+        sub.textContent = `${allPrices.length} stocks tracked`;
+    }
+}
+
+// -----------------------------------------------------------------------
+// Render table
+// -----------------------------------------------------------------------
+function renderTable() {
+    const tbody = document.getElementById('pricesBody');
+    if (!tbody) return;
+
+    let data = [...allPrices];
+
+    // Sort
+    data.sort((a, b) => {
+        let va = a[currentSort.key], vb = b[currentSort.key];
+        if (va == null) va = currentSort.key === 'ticker' ? '' : -Infinity;
+        if (vb == null) vb = currentSort.key === 'ticker' ? '' : -Infinity;
+        if (typeof va === 'string') va = va.toLowerCase();
+        if (typeof vb === 'string') vb = vb.toLowerCase();
+        if (va < vb) return currentSort.asc ? -1 : 1;
+        if (va > vb) return currentSort.asc ? 1 : -1;
+        return 0;
+    });
+
+    // Update sort indicators
+    document.querySelectorAll('.sortable i').forEach(icon => {
+        icon.className = 'bi bi-chevron-expand text-muted';
+        icon.style.fontSize = '0.7em';
+    });
+    const activeHeader = document.querySelector(`.sortable[data-sort="${currentSort.key}"] i`);
+    if (activeHeader) {
+        activeHeader.className = currentSort.asc ? 'bi bi-chevron-up text-primary' : 'bi bi-chevron-down text-primary';
+        activeHeader.style.fontSize = '0.7em';
+    }
+
+    if (!data.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-5">' +
+            '<i class="bi bi-clock-history fs-1"></i>' +
+            '<p class="mt-2 mb-0">No price data yet</p>' +
+            '<p class="text-muted small">The scheduler fetches prices every 15 minutes. Check back shortly.</p>' +
+            '</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = data.map(s => {
+        const isWatchlist = WATCHLIST_CODES.includes(s.ticker);
+        const pct = s.change_pct;
+        const isUp = pct > 0;
+        const isDown = pct < 0;
+        const pctClass = isUp ? 'text-success' : (isDown ? 'text-danger' : 'text-muted');
+        const pctBg = isUp ? 'bg-success-subtle' : (isDown ? 'bg-danger-subtle' : '');
+        const arrow = isUp ? '<i class="bi bi-caret-up-fill"></i>' : (isDown ? '<i class="bi bi-caret-down-fill"></i>' : '');
+        const pctText = pct != null ? (isUp ? '+' : '') + pct.toFixed(2) + '%' : '\u2014';
+        const star = isWatchlist ? '<i class="bi bi-star-fill text-warning me-1" style="font-size:0.7em;"></i>' : '';
+        const ts = s.timestamp ? new Date(s.timestamp).toLocaleTimeString('en-ZA', { hour:'2-digit', minute:'2-digit' }) : '\u2014';
+
+        return `<tr class="price-row ${pctBg}" data-ticker="${esc(s.ticker)}" data-watchlist="${isWatchlist}" style="cursor:pointer;" onclick="showHistory('${esc(s.ticker)}')">
+            <td><strong>${star}${esc(s.ticker)}</strong></td>
+            <td class="text-end font-monospace">${formatZAR(s.price)}</td>
+            <td class="text-end font-monospace ${pctClass} fw-bold">${arrow} ${pctText}</td>
+            <td class="text-end font-monospace d-none d-md-table-cell">${s.day_high != null ? formatZAR(s.day_high) : '\u2014'}</td>
+            <td class="text-end font-monospace d-none d-md-table-cell">${s.day_low != null ? formatZAR(s.day_low) : '\u2014'}</td>
+            <td class="text-end font-monospace d-none d-lg-table-cell">${s.volume != null ? Number(s.volume).toLocaleString('en-ZA') : '\u2014'}</td>
+            <td class="text-end small text-muted d-none d-lg-table-cell">${ts}</td>
+        </tr>`;
+    }).join('');
+
+    filterTable();
+}
+
+// -----------------------------------------------------------------------
+// Filter (search + watchlist toggle)
+// -----------------------------------------------------------------------
+function filterTable() {
+    const searchTerm = (document.getElementById('priceSearch')?.value || '').toLowerCase();
+    const watchlistOnly = document.getElementById('watchlistOnly')?.checked || false;
+    const rows = document.querySelectorAll('#pricesBody .price-row');
+
+    let visible = 0, gainers = 0, losers = 0;
+    rows.forEach(row => {
+        const ticker = (row.dataset.ticker || '').toLowerCase();
+        const isWatchlist = row.dataset.watchlist === 'true';
+        const matchesSearch = !searchTerm || ticker.includes(searchTerm);
+        const matchesWatchlist = !watchlistOnly || isWatchlist;
+
+        if (matchesSearch && matchesWatchlist) {
+            row.style.display = '';
+            visible++;
+            const pctCell = row.children[2];
+            if (pctCell) {
+                if (pctCell.classList.contains('text-success')) gainers++;
+                else if (pctCell.classList.contains('text-danger')) losers++;
+            }
+        } else {
+            row.style.display = 'none';
+        }
+    });
+
+    document.getElementById('countGainers').textContent = `${gainers} gainers`;
+    document.getElementById('countLosers').textContent = `${losers} losers`;
+    document.getElementById('countTotal').textContent = `${visible} stocks`;
+}
+
+// -----------------------------------------------------------------------
+// Price History Modal
+// -----------------------------------------------------------------------
+async function showHistory(ticker) {
+    const modal = new bootstrap.Modal(document.getElementById('priceHistoryModal'));
+    document.getElementById('historyModalTitle').textContent = `${ticker} \u2014 Price History (24h)`;
+    document.getElementById('historyKPIs').innerHTML = '<div class="col text-center"><div class="spinner-border spinner-border-sm"></div></div>';
+    document.getElementById('historyTableBody').innerHTML = '';
+    if (historyChart) { historyChart.destroy(); historyChart = null; }
+    modal.show();
+
+    try {
+        const resp = await fetch(`/api/prices/${ticker}`);
+        const json = await resp.json();
+        if (json.status !== 'success') {
+            document.getElementById('historyKPIs').innerHTML = `<div class="col text-center text-muted">No history available for ${ticker}</div>`;
+            return;
+        }
+
+        const latest = json.latest;
+        const history = json.history || [];
+
+        // KPIs
+        const pct = latest.change_pct;
+        const pctClass = pct > 0 ? 'text-success' : (pct < 0 ? 'text-danger' : 'text-muted');
+        const pctText = pct != null ? (pct > 0 ? '+' : '') + pct.toFixed(2) + '%' : '\u2014';
+        document.getElementById('historyKPIs').innerHTML = `
+            <div class="col-4 col-md-2 text-center">
+                <div class="text-muted small">Last Price</div>
+                <div class="fw-bold">${formatZAR(latest.price)}</div>
+            </div>
+            <div class="col-4 col-md-2 text-center">
+                <div class="text-muted small">Change</div>
+                <div class="fw-bold ${pctClass}">${pctText}</div>
+            </div>
+            <div class="col-4 col-md-2 text-center">
+                <div class="text-muted small">Volume</div>
+                <div class="fw-bold">${latest.volume != null ? Number(latest.volume).toLocaleString('en-ZA') : '\u2014'}</div>
+            </div>
+            <div class="col-4 col-md-2 text-center">
+                <div class="text-muted small">Day High</div>
+                <div class="fw-bold">${latest.day_high != null ? formatZAR(latest.day_high) : '\u2014'}</div>
+            </div>
+            <div class="col-4 col-md-2 text-center">
+                <div class="text-muted small">Day Low</div>
+                <div class="fw-bold">${latest.day_low != null ? formatZAR(latest.day_low) : '\u2014'}</div>
+            </div>
+            <div class="col-4 col-md-2 text-center">
+                <div class="text-muted small">Records</div>
+                <div class="fw-bold">${history.length}</div>
+            </div>`;
+
+        // Chart
+        if (history.length >= 2) {
+            const reversed = [...history].reverse();
+            const labels = reversed.map(r => {
+                const d = new Date(r.timestamp);
+                return d.toLocaleString('en-ZA', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+            });
+            const prices = reversed.map(r => r.price);
+            const colour = pct >= 0 ? '#198754' : '#dc3545';
+
+            const ctx = document.getElementById('historyChart')?.getContext('2d');
+            if (ctx) {
+                historyChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels,
+                        datasets: [{
+                            data: prices,
+                            borderColor: colour,
+                            backgroundColor: colour + '20',
+                            fill: true,
+                            tension: 0.3,
+                            pointRadius: 3,
+                            pointHoverRadius: 6,
+                            borderWidth: 2,
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: (ctx) => 'R' + ctx.parsed.y.toFixed(2)
+                                }
+                            }
+                        },
+                        scales: {
+                            x: { grid: { display: false }, ticks: { maxRotation: 45, font: { size: 10 } } },
+                            y: { grid: { color: '#f0f0f0' }, ticks: { callback: v => 'R' + v.toFixed(0) } }
+                        }
+                    }
+                });
+            }
+        }
+
+        // History table
+        document.getElementById('historyTableBody').innerHTML = history.map(r => {
+            const ts = new Date(r.timestamp).toLocaleString('en-ZA', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+            return `<tr>
+                <td class="small">${ts}</td>
+                <td class="text-end font-monospace">${formatZAR(r.price)}</td>
+                <td class="text-end font-monospace">${r.volume != null ? Number(r.volume).toLocaleString('en-ZA') : '\u2014'}</td>
+                <td class="text-end font-monospace">${r.day_high != null ? formatZAR(r.day_high) : '\u2014'}</td>
+                <td class="text-end font-monospace">${r.day_low != null ? formatZAR(r.day_low) : '\u2014'}</td>
+            </tr>`;
+        }).join('');
+
+    } catch (err) {
+        console.error('Failed to load history:', err);
+        document.getElementById('historyKPIs').innerHTML = `<div class="col text-center text-danger">Failed to load history</div>`;
+    }
+}
+
+// -----------------------------------------------------------------------
+// Utilities
+// -----------------------------------------------------------------------
+function formatZAR(v) {
+    if (v == null) return '\u2014';
+    return 'R' + Number(v).toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function esc(t) {
+    if (!t) return '';
+    const d = document.createElement('div');
+    d.textContent = t;
+    return d.innerHTML;
+}
+</script>
+{% endblock %}
