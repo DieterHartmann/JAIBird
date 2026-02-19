@@ -189,6 +189,33 @@
     </div>
 </div>
 
+<!-- Dashboard Preferences -->
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-speedometer2"></i> Dashboard Preferences
+                </h5>
+            </div>
+            <div class="card-body">
+                <label for="tickerSpeedRange" class="form-label fw-bold">
+                    Ticker Scroll Speed
+                </label>
+                <div class="d-flex align-items-center gap-3">
+                    <span class="small text-muted">Fast</span>
+                    <input type="range" class="form-range flex-grow-1" id="tickerSpeedRange"
+                           min="15" max="120" step="5" value="60">
+                    <span class="small text-muted">Slow</span>
+                </div>
+                <div class="text-center small text-muted mt-1">
+                    Current: <span id="tickerSpeedLabel">60</span>s per cycle
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Configuration Help -->
 <div class="row mt-4">
     <div class="col-12">
@@ -239,11 +266,22 @@
 <script>
 function refreshStats() {
     showLoading('Refreshing statistics...');
-    
-    // Refresh the page after a short delay
-    setTimeout(() => {
-        window.location.reload();
-    }, 1000);
+    setTimeout(() => { window.location.reload(); }, 1000);
 }
+
+(function() {
+    const slider = document.getElementById('tickerSpeedRange');
+    const label  = document.getElementById('tickerSpeedLabel');
+    if (!slider) return;
+
+    const saved = localStorage.getItem('jaibird_ticker_speed');
+    if (saved) slider.value = saved;
+    label.textContent = slider.value;
+
+    slider.addEventListener('input', () => {
+        label.textContent = slider.value;
+        localStorage.setItem('jaibird_ticker_speed', slider.value);
+    });
+})();
 </script>
 {% endblock %}

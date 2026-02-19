@@ -259,14 +259,31 @@ class PriceService:
         return self.db.get_latest_prices()
 
     def get_movers(self, n: int = 5) -> Dict[str, List[Dict]]:
-        """Top N gainers and losers by daily change %."""
+        """Top N gainers and losers by daily change %, enriched with company name + recent SENS."""
         snapshot = self.get_snapshot()
         with_change = [s for s in snapshot if s.get("change_pct") is not None]
         by_change = sorted(with_change, key=lambda x: x["change_pct"], reverse=True)
-        return {
+        movers = {
             "gainers": by_change[:n],
             "losers": by_change[-n:][::-1] if len(by_change) >= n else [],
         }
+        self._enrich_movers(movers["gainers"] + movers["losers"])
+        return movers
+
+    def _enrich_movers(self, items: List[Dict]):
+        """Add company_name and recent_sens to each mover item."""
+        company_cache: Dict[str, str] = {}
+        for item in items:
+            ticker = item.get("ticker", "")
+            if ticker not in company_cache:
+                co = self.db.get_company_by_jse_code(ticker)
+                company_cache[ticker] = co.name if co else ""
+            item["company_name"] = company_cache[ticker]
+
+            try:
+                item["recent_sens"] = self.db.get_recent_sens_for_code(ticker, hours=36)
+            except Exception:
+                item["recent_sens"] = []
 
     def get_momentum_report(self) -> List[Dict[str, Any]]:
         """For every hot-list ticker, compute price change since SENS trigger."""

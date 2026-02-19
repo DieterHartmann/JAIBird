@@ -259,7 +259,7 @@ footer {
 /* Today ticker banner */
 .ticker-scroll {
     display: inline-block;
-    animation: ticker-slide 30s linear infinite;
+    animation: ticker-slide 60s linear infinite;
 }
 
 .ticker-scroll:hover {

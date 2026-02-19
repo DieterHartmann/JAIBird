@@ -452,6 +452,29 @@ class DatabaseManager:
             
             return [self._row_to_sens_announcement(row) for row in rows]
     
+    def get_recent_sens_for_code(self, jse_code: str, hours: int = 36) -> List[Dict]:
+        """Get recent SENS for a specific JSE code (lightweight, for tooltips)."""
+        with self.get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT sens_number, company_name, title, date_published, ai_summary
+                FROM sens_announcements
+                WHERE company_name LIKE ?
+                  AND date_published >= datetime('now', ? || ' hours')
+                ORDER BY date_published DESC
+                LIMIT 5
+            """, (f'%{jse_code}%', str(-hours)))
+            rows = cursor.fetchall()
+            return [
+                {
+                    "sens_number": r["sens_number"],
+                    "title": r["title"],
+                    "date_published": r["date_published"],
+                    "ai_summary": r["ai_summary"] or "",
+                }
+                for r in rows
+            ]
+
     def mark_sens_processed(self, sens_id: int) -> bool:
         """Mark a SENS announcement as processed."""
         with self.get_connection() as conn:

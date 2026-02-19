@@ -433,22 +433,6 @@ class NotificationManager:
                 if not telegram_success:
                     success = False
             
-            # Send email alert for watchlist companies
-            if is_watchlist_company:
-                email_success = self.email.send_watchlist_alert(announcement)
-                
-                # Log notification attempt
-                notification = Notification(
-                    sens_id=announcement.id,
-                    notification_type='email',
-                    status='sent' if email_success else 'failed',
-                    error_message='' if email_success else 'Failed to send email alert'
-                )
-                self.db_manager.log_notification(notification)
-                
-                if not email_success:
-                    success = False
-            
             return success
             
         except Exception as e:

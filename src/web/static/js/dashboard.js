@@ -137,13 +137,16 @@ function renderScrapeHealth() {
     const text = document.getElementById('scrapeHealthText');
     if (!bar || !inner || !dot || !text) return;
 
+    bar.style.display = '';
     const h = dashData.scrape_health;
+
     if (!h || !h.last_scrape_time) {
-        bar.style.display = 'none';
+        dot.style.color = '#6c757d';
+        inner.style.background = 'rgba(108,117,125,0.06)';
+        text.textContent = 'Scraper status: awaiting first run after update';
         return;
     }
 
-    bar.style.display = '';
     const lastOk = new Date(h.last_scrape_time);
     const minsAgo = Math.round((Date.now() - lastOk.getTime()) / 60000);
     const failures = h.consecutive_failures || 0;
@@ -198,6 +201,9 @@ function renderTodayTicker() {
     }).join('<span class="ticker-sep mx-3 text-muted">|</span>');
 
     content.innerHTML = html;
+
+    const speed = localStorage.getItem('jaibird_ticker_speed') || '60';
+    content.style.animationDuration = speed + 's';
 }
 
 // ---------------------------------------------------------------------------
@@ -648,41 +654,11 @@ function renderMarketMovers() {
     const losersEl = document.getElementById('losersBody');
     const updatedEl = document.getElementById('priceLastUpdated');
 
-    if (gainersEl) {
-        if (!movers.gainers.length) {
-            gainersEl.innerHTML = '<div class="text-center text-muted py-2">No price data yet</div>';
-        } else {
-            gainersEl.innerHTML = movers.gainers.map(s => {
-                const pct = s.change_pct != null ? s.change_pct.toFixed(2) : '—';
-                const price = s.price != null ? formatZAR(s.price) : '—';
-                return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom">
-                    <div>
-                        <strong>${esc(s.ticker)}</strong>
-                        <span class="text-muted ms-1">${price}</span>
-                    </div>
-                    <span class="badge bg-success">+${pct}%</span>
-                </div>`;
-            }).join('');
-        }
-    }
+    if (gainersEl) disposeTooltips(gainersEl);
+    if (losersEl) disposeTooltips(losersEl);
 
-    if (losersEl) {
-        if (!movers.losers.length) {
-            losersEl.innerHTML = '<div class="text-center text-muted py-2">No price data yet</div>';
-        } else {
-            losersEl.innerHTML = movers.losers.map(s => {
-                const pct = s.change_pct != null ? s.change_pct.toFixed(2) : '—';
-                const price = s.price != null ? formatZAR(s.price) : '—';
-                return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom">
-                    <div>
-                        <strong>${esc(s.ticker)}</strong>
-                        <span class="text-muted ms-1">${price}</span>
-                    </div>
-                    <span class="badge bg-danger">${pct}%</span>
-                </div>`;
-            }).join('');
-        }
-    }
+    _renderMoverList(gainersEl, movers.gainers, 'success', '+');
+    _renderMoverList(losersEl, movers.losers, 'danger', '');
 
     if (updatedEl) {
         const allMovers = [...(movers.gainers || []), ...(movers.losers || [])];
@@ -691,6 +667,60 @@ function renderMarketMovers() {
             updatedEl.textContent = 'Updated ' + ts.toLocaleTimeString('en-ZA', { hour: '2-digit', minute: '2-digit' });
         }
     }
+}
+
+function _renderMoverList(el, items, colour, prefix) {
+    if (!el) return;
+    if (!items || !items.length) {
+        el.innerHTML = '<div class="text-center text-muted py-2">No price data yet</div>';
+        return;
+    }
+
+    el.innerHTML = items.map((s, idx) => {
+        const pct = s.change_pct != null ? s.change_pct.toFixed(2) : '—';
+        const price = s.price != null ? formatZAR(s.price) : '—';
+        const coName = s.company_name || '';
+        const sens = s.recent_sens || [];
+
+        const dots = sens.map((r, di) =>
+            `<span class="mover-sens-dot" data-mover="${idx}" data-dot="${di}" style="cursor:help;font-size:0.55rem;vertical-align:middle;">&#9679;</span>`
+        ).join(' ');
+
+        return `<div class="d-flex justify-content-between align-items-center py-1 border-bottom">
+            <div class="mover-name" data-mover-idx="${idx}" style="cursor:help;">
+                <strong>${esc(s.ticker)}</strong>
+                <span class="text-muted ms-1">${price}</span>
+            </div>
+            <div class="d-flex align-items-center gap-1">
+                ${dots ? '<span class="text-warning">' + dots + '</span>' : ''}
+                <span class="badge bg-${colour}">${prefix}${pct}%</span>
+            </div>
+        </div>`;
+    }).join('');
+
+    // Tooltip: company name on ticker hover
+    el.querySelectorAll('.mover-name').forEach(nameEl => {
+        const idx = parseInt(nameEl.dataset.moverIdx, 10);
+        const s = items[idx];
+        const tip = s.company_name
+            ? `<strong>${esc(s.company_name)}</strong><br>${esc(s.ticker)} &mdash; ${s.price != null ? formatZAR(s.price) : '—'}`
+            : esc(s.ticker);
+        new bootstrap.Tooltip(nameEl, { title: tip, html: true, placement: 'top', container: 'body' });
+    });
+
+    // Tooltip: each SENS dot
+    el.querySelectorAll('.mover-sens-dot').forEach(dotEl => {
+        const idx = parseInt(dotEl.dataset.mover, 10);
+        const di = parseInt(dotEl.dataset.dot, 10);
+        const s = items[idx];
+        const r = (s.recent_sens || [])[di];
+        if (!r) return;
+        const dt = r.date_published ? new Date(r.date_published).toLocaleString('en-ZA', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' }) : '';
+        let tip = `<strong>${esc(r.title)}</strong>`;
+        if (dt) tip += `<br><small class="text-muted">${dt}</small>`;
+        if (r.ai_summary) tip += `<br><em>${esc(r.ai_summary.substring(0, 150))}${r.ai_summary.length > 150 ? '...' : ''}</em>`;
+        new bootstrap.Tooltip(dotEl, { title: tip, html: true, placement: 'top', container: 'body' });
+    });
 }
 
 // ---------------------------------------------------------------------------
