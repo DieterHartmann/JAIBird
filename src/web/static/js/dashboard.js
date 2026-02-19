@@ -80,9 +80,9 @@ function renderAll() {
     if (!dashData) return;
     // Each widget is independently try/caught so one failure doesn't break the rest
     const widgets = [
-        updateKPIs, renderTodayTicker, renderTopCompanies, renderCategories,
-        renderVolume, renderNoiseDoughnut, renderSectorChart, renderHighlights,
-        renderHeatmap, renderDirectorSignal, renderUnusualAlerts,
+        updateKPIs, renderScrapeHealth, renderTodayTicker, renderTopCompanies,
+        renderCategories, renderVolume, renderNoiseDoughnut, renderSectorChart,
+        renderHighlights, renderHeatmap, renderDirectorSignal, renderUnusualAlerts,
         renderWatchlistPulse, renderSentiment, renderSummaryCards, renderEvents,
         renderMarketMovers, renderMomentum,
     ];
@@ -125,6 +125,56 @@ function updateKPIs() {
 function setT(id, text) {
     const el = document.getElementById(id);
     if (el) el.textContent = text;
+}
+
+// ---------------------------------------------------------------------------
+// Scrape Health Indicator
+// ---------------------------------------------------------------------------
+function renderScrapeHealth() {
+    const bar = document.getElementById('scrapeHealthBar');
+    const inner = document.getElementById('scrapeHealthInner');
+    const dot = document.getElementById('scrapeHealthDot');
+    const text = document.getElementById('scrapeHealthText');
+    if (!bar || !inner || !dot || !text) return;
+
+    const h = dashData.scrape_health;
+    if (!h || !h.last_scrape_time) {
+        bar.style.display = 'none';
+        return;
+    }
+
+    bar.style.display = '';
+    const lastOk = new Date(h.last_scrape_time);
+    const minsAgo = Math.round((Date.now() - lastOk.getTime()) / 60000);
+    const failures = h.consecutive_failures || 0;
+
+    let colour, bg, label;
+    if (failures >= 3) {
+        colour = '#dc3545'; bg = 'rgba(220,53,69,0.08)';
+        label = `Scraper DOWN - ${failures} consecutive failures. Last success: ${formatAgo(minsAgo)}`;
+    } else if (failures >= 1) {
+        colour = '#ffc107'; bg = 'rgba(255,193,7,0.08)';
+        label = `Scraper warning - ${failures} failure(s). Last success: ${formatAgo(minsAgo)}`;
+    } else if (minsAgo > 15) {
+        colour = '#ffc107'; bg = 'rgba(255,193,7,0.08)';
+        label = `Last scrape: ${formatAgo(minsAgo)} (overdue)`;
+    } else {
+        colour = '#198754'; bg = 'rgba(25,135,84,0.06)';
+        label = `Scraper healthy - last run ${formatAgo(minsAgo)}`;
+    }
+
+    dot.style.color = colour;
+    inner.style.background = bg;
+    text.textContent = label;
+}
+
+function formatAgo(mins) {
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ${mins % 60}m ago`;
+    const days = Math.floor(hrs / 24);
+    return `${days}d ${hrs % 24}h ago`;
 }
 
 // ---------------------------------------------------------------------------

@@ -3,11 +3,13 @@ JAIBird Stock Trading Platform - Main Entry Point
 Coordinates all components and provides CLI interface.
 """
 
+import gc
 import os
 import sys
 import time
 import logging
 import argparse
+import subprocess
 import schedule
 from datetime import datetime
 from threading import Thread
@@ -34,7 +36,9 @@ logger = logging.getLogger(__name__)
 
 class JAIBirdScheduler:
     """Main scheduler for JAIBird operations."""
-    
+
+    MAX_CONSECUTIVE_FAILURES = 3
+
     def __init__(self):
         self.config = get_config()
         self.db_manager = DatabaseManager(self.config.database_path)
@@ -43,19 +47,14 @@ class JAIBirdScheduler:
         self.scraper = SensScraper(self.db_manager)
         self.price_service = PriceService(self.db_manager)
         self.running = False
+        self._consecutive_scrape_failures = 0
     
     def setup_schedules(self):
         """Set up scheduled tasks."""
-        # Schedule SENS scraping every N minutes
         schedule.every(self.config.scrape_interval_minutes).minutes.do(self.scheduled_scrape)
-        
-        # Schedule daily digest at specified time
         schedule.every().day.at(self.config.daily_digest_time).do(self.send_daily_digest)
-        
-        # Schedule file cleanup daily at midnight
         schedule.every().day.at("00:00").do(self.cleanup_old_files)
 
-        # Stock price polling
         schedule.every(15).minutes.do(self.fetch_all_prices)
         schedule.every(2).minutes.do(self.fetch_hot_prices)
         schedule.every().day.at("00:30").do(self.cleanup_old_prices)
@@ -64,26 +63,32 @@ class JAIBirdScheduler:
         logger.info(f"Scheduled daily digest at {self.config.daily_digest_time}")
         logger.info("Scheduled daily file cleanup at midnight")
         logger.info("Scheduled stock price polling every 15 min (hot-list every 2 min)")
-    
+
+    # ------------------------------------------------------------------
+    # Scrape lifecycle with nil-pull vs non-pull tracking
+    # ------------------------------------------------------------------
+
     def scheduled_scrape(self):
-        """Perform scheduled SENS scraping."""
+        """Perform scheduled SENS scraping with resilience tracking."""
+        scrape_ok = False
+        new_count = 0
+        error_msg = ""
+
         try:
             logger.info("Starting scheduled SENS scrape")
             announcements = self.scraper.scrape_daily_announcements()
-            
-            # Process notifications for new announcements
+            scrape_ok = True
+            new_count = len(announcements)
+
             for announcement in announcements:
-                # Parse PDF and generate AI summary for ALL new announcements
                 try:
                     parsed_announcement = parse_sens_announcement(announcement)
                     if parsed_announcement.ai_summary:
-                        # Update the database with parsed content
                         self.db_manager.update_sens_parsing(parsed_announcement)
                         logger.info(f"Generated AI summary for SENS {announcement.sens_number}")
                 except Exception as e:
                     logger.error(f"PDF parsing failed for SENS {announcement.sens_number}: {e}")
-                
-                # Upload to Dropbox
+
                 if announcement.local_pdf_path:
                     dropbox_path = self.dropbox_manager.upload_pdf(
                         announcement.local_pdf_path,
@@ -91,19 +96,51 @@ class JAIBirdScheduler:
                         announcement.company_name
                     )
                     if dropbox_path:
-                        # Update database with Dropbox path
                         announcement.dropbox_pdf_path = dropbox_path
-                
-                # Send notifications
-                self.notification_manager.process_new_announcement(announcement)
 
-                # Add company to price hot-list for momentum tracking
+                self.notification_manager.process_new_announcement(announcement)
                 self._add_to_hot_list(announcement)
-            
-            logger.info(f"Scheduled scrape completed: {len(announcements)} new announcements")
-            
+
+            logger.info(f"Scheduled scrape completed: {new_count} new announcements")
+
         except Exception as e:
-            logger.error(f"Scheduled scrape failed: {e}")
+            error_msg = str(e)
+            logger.error(f"Scheduled scrape failed (NON-PULL): {e}")
+        finally:
+            self._kill_zombie_chrome()
+            self._force_gc()
+
+        self._record_scrape_result(scrape_ok, new_count, error_msg)
+
+    def _record_scrape_result(self, success: bool, count: int, error: str):
+        """Track scrape outcome: reset or increment failure counter, alert, restart."""
+        now_iso = datetime.now().isoformat()
+
+        if success:
+            self._consecutive_scrape_failures = 0
+            self.db_manager.set_config_value(
+                "last_scrape_status", "ok",
+                f"nil-pull" if count == 0 else f"{count} new")
+            self.db_manager.set_config_value("last_scrape_time", now_iso)
+            self.db_manager.set_config_value("consecutive_scrape_failures", "0")
+            return
+
+        # --- NON-PULL path ---
+        self._consecutive_scrape_failures += 1
+        self.db_manager.set_config_value(
+            "last_scrape_status", "fail", error[:200])
+        self.db_manager.set_config_value("last_scrape_fail_time", now_iso)
+        self.db_manager.set_config_value(
+            "consecutive_scrape_failures",
+            str(self._consecutive_scrape_failures))
+
+        logger.warning(
+            f"Consecutive scrape failures: {self._consecutive_scrape_failures}"
+            f"/{self.MAX_CONSECUTIVE_FAILURES}")
+
+        if self._consecutive_scrape_failures >= self.MAX_CONSECUTIVE_FAILURES:
+            self._send_failure_alert(error)
+            self._force_restart()
 
     def _add_to_hot_list(self, announcement):
         """Add a company to the price hot-list after a new SENS announcement."""
@@ -143,6 +180,87 @@ class JAIBirdScheduler:
         except Exception as e:
             logger.debug(f"Could not add hot-list entry for {announcement.company_name}: {e}")
     
+    # ------------------------------------------------------------------
+    # Zombie Chrome / memory cleanup
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _kill_zombie_chrome():
+        """Kill any lingering chromium/chrome processes left by Selenium."""
+        try:
+            import platform
+            if platform.system() != "Linux":
+                return
+            result = subprocess.run(
+                ["pkill", "-9", "-f", "chromium|chrome"],
+                capture_output=True, timeout=10,
+            )
+            if result.returncode == 0:
+                logger.info("Killed lingering chromium processes")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _force_gc():
+        """Explicit garbage collection to release memory back to the OS."""
+        gc.collect()
+
+    # ------------------------------------------------------------------
+    # Telegram failure alert
+    # ------------------------------------------------------------------
+
+    def _send_failure_alert(self, error: str):
+        """Send a Telegram alert after repeated scrape failures."""
+        try:
+            import json, tempfile
+
+            message = (
+                f"🔴 *JAIBird Scrape FAILURE*\n\n"
+                f"The SENS scraper has failed "
+                f"{self._consecutive_scrape_failures} consecutive times.\n\n"
+                f"*Last error:*\n`{error[:300]}`\n\n"
+                f"The scheduler will now *restart automatically*.\n"
+                f"If this keeps happening, check Docker logs on the Pi.\n\n"
+                f"_JAIBird Health Monitor_"
+            )
+
+            msg_data = {"type": "system_alert", "message": message}
+            with tempfile.NamedTemporaryFile(
+                mode="w", suffix=".json", delete=False
+            ) as f:
+                json.dump(msg_data, f)
+                temp_path = f.name
+
+            script = os.path.join(
+                os.path.dirname(__file__),
+                "src", "notifications", "telegram_sender.py",
+            )
+            python_exe = sys.executable or "python"
+            subprocess.run(
+                [python_exe, script, temp_path],
+                timeout=30, capture_output=True,
+            )
+            logger.info("Failure alert sent via Telegram")
+        except Exception as e:
+            logger.error(f"Failed to send Telegram failure alert: {e}")
+
+    # ------------------------------------------------------------------
+    # Force restart (let Docker's restart policy bring us back clean)
+    # ------------------------------------------------------------------
+
+    def _force_restart(self):
+        """Exit the process so Docker restarts the container cleanly."""
+        logger.critical(
+            f"Forcing scheduler restart after "
+            f"{self._consecutive_scrape_failures} consecutive scrape failures"
+        )
+        self._kill_zombie_chrome()
+        os._exit(1)
+
+    # ------------------------------------------------------------------
+    # Standard scheduled tasks
+    # ------------------------------------------------------------------
+
     def send_daily_digest(self):
         """Send daily digest email."""
         try:
@@ -171,6 +289,8 @@ class JAIBirdScheduler:
             logger.info(f"Price fetch completed: {count} tickers updated")
         except Exception as e:
             logger.error(f"Price fetch failed: {e}")
+        finally:
+            self._force_gc()
 
     def fetch_hot_prices(self):
         """Frequent fetch of stock prices for SENS-triggered hot-list tickers."""
@@ -178,6 +298,8 @@ class JAIBirdScheduler:
             self.price_service.fetch_hot_prices()
         except Exception as e:
             logger.error(f"Hot-list price fetch failed: {e}")
+        finally:
+            self._force_gc()
 
     def cleanup_old_prices(self):
         """Prune stock price history older than 90 days."""

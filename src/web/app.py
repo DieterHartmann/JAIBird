@@ -519,6 +519,17 @@ def create_app():
             result['price_momentum'] = _safe('price_momentum', lambda:
                 price_service.get_momentum_report(), [])
 
+            # Scrape health status
+            def _health():
+                return {
+                    'last_scrape_time': db_manager.get_config_value('last_scrape_time', ''),
+                    'last_scrape_status': db_manager.get_config_value('last_scrape_status', 'unknown'),
+                    'consecutive_failures': int(
+                        db_manager.get_config_value('consecutive_scrape_failures', '0')),
+                    'last_fail_time': db_manager.get_config_value('last_scrape_fail_time', ''),
+                }
+            result['scrape_health'] = _safe('scrape_health', _health)
+
             return jsonify({'status': 'success', 'data': result})
         except Exception as e:
             logger.error(f"Dashboard full error: {e}")

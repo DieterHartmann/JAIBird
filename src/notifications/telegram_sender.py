@@ -60,6 +60,14 @@ async def send_telegram_message(message_data: dict, config) -> bool:
             )
             logger.info(f"Urgent Telegram notification sent for SENS {message_data['sens_number']}")
         
+        elif message_data['type'] == 'system_alert':
+            await bot.send_message(
+                chat_id=config.telegram_chat_id,
+                text=message_data['message'],
+                parse_mode='Markdown',
+            )
+            logger.info("System alert sent via Telegram")
+
         elif message_data['type'] == 'pdf':
             # Send PDF file
             pdf_path = message_data.get('pdf_path')
