@@ -46,6 +46,7 @@ class JAIBirdScheduler:
         self.dropbox_manager = DropboxManager()
         self.scraper = SensScraper(self.db_manager)
         self.price_service = PriceService(self.db_manager)
+        self.enricher = CompanyEnricher(CompanyDB())
         self.running = False
         self._consecutive_scrape_failures = 0
     
@@ -85,6 +86,8 @@ class JAIBirdScheduler:
                     parsed_announcement = parse_sens_announcement(announcement)
                     if parsed_announcement.ai_summary:
                         self.db_manager.update_sens_parsing(parsed_announcement)
+                        announcement.pdf_content = parsed_announcement.pdf_content
+                        announcement.ai_summary = parsed_announcement.ai_summary
                         logger.info(f"Generated AI summary for SENS {announcement.sens_number}")
                 except Exception as e:
                     logger.error(f"PDF parsing failed for SENS {announcement.sens_number}: {e}")
@@ -100,6 +103,11 @@ class JAIBirdScheduler:
 
                 self.notification_manager.process_new_announcement(announcement)
                 self._add_to_hot_list(announcement)
+
+                try:
+                    self.enricher.enrich_from_announcement(announcement)
+                except Exception as e:
+                    logger.warning(f"Company enrichment failed for SENS {announcement.sens_number}: {e}")
 
             logger.info(f"Scheduled scrape completed: {new_count} new announcements")
 
@@ -351,7 +359,8 @@ def main():
     parser = argparse.ArgumentParser(description="JAIBird Stock Trading Platform")
     parser.add_argument('command', choices=[
         'web', 'scrape', 'initial-scrape', 'digest', 'test-notifications',
-        'test-telegram', 'scheduler', 'setup', 'status', 'export-excel', 'parse-pdfs', 'telegram-bot'
+        'test-telegram', 'scheduler', 'setup', 'status', 'export-excel',
+        'parse-pdfs', 'telegram-bot', 'backfill-companies'
     ], help='Command to execute')
     parser.add_argument('--config', help='Path to config file')
     parser.add_argument('--debug', action='store_true', help='Enable debug logging')
@@ -532,7 +541,11 @@ def main():
         elif args.command == 'telegram-bot':
             logger.info("Starting interactive Telegram bot...")
             run_telegram_bot()
-            
+
+        elif args.command == 'backfill-companies':
+            logger.info("Backfilling company intelligence DB from existing SENS...")
+            backfill_companies()
+
     except Exception as e:
         logger.error(f"JAIBird failed: {e}")
         sys.exit(1)
@@ -725,6 +738,41 @@ def run_telegram_bot():
     except Exception as e:
         logger.error(f"Error starting Telegram bot: {e}")
         raise
+
+
+def backfill_companies():
+    """Backfill company intelligence DB from all existing SENS with pdf_content."""
+    try:
+        config = get_config()
+        db_manager = DatabaseManager(config.database_path)
+        enricher = CompanyEnricher(CompanyDB())
+
+        all_sens = db_manager.get_all_sens_announcements()
+        with_content = [a for a in all_sens if a.pdf_content]
+        total = len(with_content)
+
+        print(f"Found {len(all_sens)} total SENS, {total} with parsed content")
+        if not total:
+            print("Nothing to backfill. Run 'parse-pdfs' first to extract PDF content.")
+            return
+
+        success = 0
+        for i, ann in enumerate(with_content, 1):
+            try:
+                enricher.enrich_from_announcement(ann)
+                success += 1
+                if i % 25 == 0 or i == total:
+                    print(f"  [{i}/{total}] processed... ({success} enriched)")
+            except Exception as e:
+                logger.warning(f"  [{i}/{total}] failed for {ann.sens_number}: {e}")
+
+        count = enricher.company_db.get_company_count()
+        print(f"\nBackfill complete: {success}/{total} SENS processed")
+        print(f"Company intelligence DB now has {count} companies")
+
+    except Exception as e:
+        print(f"Backfill failed: {e}")
+        logger.error(f"Backfill failed: {e}")
 
 
 if __name__ == "__main__":

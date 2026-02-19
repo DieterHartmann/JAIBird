@@ -36,6 +36,7 @@ from ..analytics.sens_categorizer import (
     get_sector_breakdown,
 )
 from ..services.price_service import PriceService
+from ..company.company_db import CompanyDB
 
 
 logger = logging.getLogger(__name__)
@@ -588,6 +589,48 @@ def create_app():
             return jsonify({'status': 'success', 'data': report})
         except Exception as e:
             logger.error(f"Price momentum API error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    # ====================================================================
+    # COMPANY INTELLIGENCE ENDPOINTS
+    # ====================================================================
+
+    company_db = CompanyDB()
+
+    @app.route('/companies')
+    def companies_page():
+        """Company intelligence database page."""
+        try:
+            count = company_db.get_company_count()
+            return render_template('companies.html', company_count=count)
+        except Exception as e:
+            logger.error(f"Error loading companies page: {e}")
+            return render_template('companies.html', company_count=0)
+
+    @app.route('/api/companies')
+    def api_companies():
+        """List all companies (lightweight)."""
+        try:
+            q = request.args.get('q', '').strip()
+            if q:
+                data = company_db.search_companies(q)
+            else:
+                data = company_db.get_all_profiles()
+            return jsonify({'status': 'success', 'data': data, 'count': len(data)})
+        except Exception as e:
+            logger.error(f"Companies API error: {e}")
+            return jsonify({'status': 'error', 'message': str(e)}), 500
+
+    @app.route('/api/companies/<int:company_id>')
+    def api_company_detail(company_id):
+        """Full detail for a single company."""
+        try:
+            detail = company_db.get_company_detail(company_id)
+            if not detail:
+                return jsonify({'status': 'error', 'message': 'Company not found'}), 404
+            return jsonify({'status': 'success', 'data': detail})
+        except Exception as e:
+            logger.error(f"Company detail API error: {e}")
             return jsonify({'status': 'error', 'message': str(e)}), 500
 
     # Error handlers
