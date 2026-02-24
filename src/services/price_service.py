@@ -4,6 +4,7 @@ Fetches JSE stock prices via Yahoo Finance (yfinance) and stores them in SQLite.
 Supports bulk periodic polling and SENS-triggered hot-list tracking.
 """
 
+import gc
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -13,6 +14,9 @@ import pandas as pd
 import yfinance as yf
 
 logger = logging.getLogger(__name__)
+
+# Batch size for yfinance downloads to limit peak memory usage
+_BATCH_SIZE = 40
 
 
 class PriceService:
@@ -77,14 +81,25 @@ class PriceService:
     # ------------------------------------------------------------------
 
     def fetch_all_prices(self) -> int:
-        """Batch-fetch latest prices for all tickers. Returns count stored."""
+        """Batch-fetch latest prices for all tickers in small batches to cap memory."""
         tickers = self.get_tickers()
         if not tickers:
             logger.warning("No tickers configured – nothing to fetch")
             return 0
 
         yahoo_syms = [self._to_yahoo(t) for t in tickers]
+        total_count = 0
 
+        for batch_start in range(0, len(yahoo_syms), _BATCH_SIZE):
+            batch = yahoo_syms[batch_start : batch_start + _BATCH_SIZE]
+            total_count += self._fetch_batch(batch)
+
+        logger.info(f"Bulk fetch: stored prices for {total_count}/{len(tickers)} tickers")
+        return total_count
+
+    def _fetch_batch(self, yahoo_syms: List[str]) -> int:
+        """Download and store prices for a single batch, then release memory."""
+        data = None
         try:
             data = yf.download(
                 yahoo_syms,
@@ -96,7 +111,6 @@ class PriceService:
             )
 
             if data is None or data.empty:
-                logger.warning("yfinance returned empty data")
                 return 0
 
             count = 0
@@ -120,7 +134,6 @@ class PriceService:
                     latest = ticker_df.iloc[-1]
                     raw_close = float(latest["Close"])
 
-                    # Change % calculated from raw cents (ratio is unit-agnostic)
                     prev_close = (
                         float(ticker_df["Close"].iloc[-2])
                         if len(ticker_df) >= 2
@@ -132,7 +145,6 @@ class PriceService:
                         else None
                     )
 
-                    # Convert ZAc (cents) -> ZAR (rands), drop fractional cents
                     price = self._zac_to_zar(raw_close)
                     vol = (
                         int(latest["Volume"])
@@ -163,12 +175,14 @@ class PriceService:
                 except Exception as e:
                     logger.debug(f"Skipped {sym}: {e}")
 
-            logger.info(f"Bulk fetch: stored prices for {count}/{len(tickers)} tickers")
             return count
 
         except Exception as e:
             logger.error(f"Batch price fetch failed: {e}")
             return 0
+        finally:
+            del data
+            gc.collect()
 
     # ------------------------------------------------------------------
     # Hot-list fetch (every 2 min, only SENS-triggered tickers)
@@ -182,6 +196,7 @@ class PriceService:
 
         count = 0
         yahoo_syms = [self._to_yahoo(t) for t in hot_tickers]
+        data = None
 
         try:
             data = yf.download(
@@ -245,6 +260,9 @@ class PriceService:
 
         except Exception as e:
             logger.error(f"Hot-list price fetch failed: {e}")
+        finally:
+            del data
+            gc.collect()
 
         if count:
             logger.info(f"Hot-list: stored prices for {count}/{len(hot_tickers)} tickers")

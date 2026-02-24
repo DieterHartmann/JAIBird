@@ -34,7 +34,11 @@ class CompanyProfile:
 
 
 class CompanyDB:
-    """Lightweight manager for company intelligence SQLite database."""
+    """Lightweight manager for company intelligence SQLite database.
+
+    Uses a single persistent connection (WAL mode supports concurrent readers)
+    to avoid the overhead of opening/closing connections on every operation.
+    """
 
     def __init__(self, db_path: Optional[str] = None) -> None:
         cfg = get_config()
@@ -43,13 +47,25 @@ class CompanyDB:
             path = db_path
         self.db_path = Path(path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        self._conn: Optional[sqlite3.Connection] = None
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        """Return the persistent connection, creating it if needed."""
+        if self._conn is None:
+            self._conn = sqlite3.connect(self.db_path, timeout=30)
+            self._conn.row_factory = sqlite3.Row
+            self._conn.execute("PRAGMA journal_mode=WAL")
+        return self._conn
+
+    def close(self) -> None:
+        """Explicitly close the persistent connection."""
+        if self._conn is not None:
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
 
     # ------------------------------------------------------------------
     # Schema

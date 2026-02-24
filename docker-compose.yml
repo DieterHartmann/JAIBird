@@ -7,12 +7,18 @@ services:
       - ./data:/app/data
       - ./.env:/app/.env:ro
     mem_limit: 1536m
+    memswap_limit: 2g
+    shm_size: '256m'
+    tmpfs:
+      - /tmp:size=256m
     restart: unless-stopped
     environment:
       - CHROME_BIN=/usr/bin/chromium
       - CHROMEDRIVER_PATH=/usr/bin/chromedriver
       - TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata
       - TZ=Africa/Johannesburg
+      - MALLOC_TRIM_THRESHOLD_=65536
+      - MALLOC_MMAP_THRESHOLD_=131072
 
   web:
     build: .

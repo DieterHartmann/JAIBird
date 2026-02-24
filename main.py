@@ -4,7 +4,9 @@ Coordinates all components and provides CLI interface.
 """
 
 import gc
+import glob
 import os
+import shutil
 import sys
 import time
 import logging
@@ -59,7 +61,9 @@ class JAIBirdScheduler:
         schedule.every(15).minutes.do(self.fetch_all_prices)
         schedule.every(2).minutes.do(self.fetch_hot_prices)
         schedule.every().day.at("00:30").do(self.cleanup_old_prices)
-        
+
+        schedule.every(30).minutes.do(self._cleanup_tmp)
+
         logger.info(f"Scheduled SENS scraping every {self.config.scrape_interval_minutes} minutes")
         logger.info(f"Scheduled daily digest at {self.config.daily_digest_time}")
         logger.info("Scheduled daily file cleanup at midnight")
@@ -119,6 +123,7 @@ class JAIBirdScheduler:
             self._force_gc()
 
         self._record_scrape_result(scrape_ok, new_count, error_msg)
+        return None
 
     def _record_scrape_result(self, success: bool, count: int, error: str):
         """Track scrape outcome: reset or increment failure counter, alert, restart."""
@@ -210,8 +215,45 @@ class JAIBirdScheduler:
 
     @staticmethod
     def _force_gc():
-        """Explicit garbage collection to release memory back to the OS."""
+        """Full garbage collection pass and log current RSS."""
         gc.collect()
+        try:
+            import resource
+            rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+            logger.debug(f"Memory RSS after GC: {rss_mb:.0f} MB")
+        except Exception:
+            pass
+
+    @staticmethod
+    def _cleanup_tmp():
+        """Remove Chromium temp profiles and crash dumps from /tmp."""
+        try:
+            import platform
+            if platform.system() != "Linux":
+                return
+            removed = 0
+            for pattern in [
+                "/tmp/.com.google.Chrome.*",
+                "/tmp/chromium*",
+                "/tmp/Crashpad*",
+                "/tmp/puppeteer*",
+                "/tmp/rust_mozprofile*",
+                "/tmp/.org.chromium.*",
+                "/tmp/scoped_dir*",
+            ]:
+                for p in glob.glob(pattern):
+                    try:
+                        if os.path.isdir(p):
+                            shutil.rmtree(p, ignore_errors=True)
+                        else:
+                            os.remove(p)
+                        removed += 1
+                    except OSError:
+                        pass
+            if removed:
+                logger.info(f"Cleaned up {removed} temp entries from /tmp")
+        except Exception as e:
+            logger.debug(f"/tmp cleanup error: {e}")
 
     # ------------------------------------------------------------------
     # Telegram failure alert
@@ -280,7 +322,8 @@ class JAIBirdScheduler:
                 logger.error("Failed to send daily digest")
         except Exception as e:
             logger.error(f"Daily digest failed: {e}")
-    
+        return None
+
     def cleanup_old_files(self):
         """Clean up old PDF files."""
         try:
@@ -289,6 +332,7 @@ class JAIBirdScheduler:
             logger.info("File cleanup completed")
         except Exception as e:
             logger.error(f"File cleanup failed: {e}")
+        return None
 
     def fetch_all_prices(self):
         """Periodic bulk fetch of stock prices for all tracked tickers."""
@@ -299,6 +343,7 @@ class JAIBirdScheduler:
             logger.error(f"Price fetch failed: {e}")
         finally:
             self._force_gc()
+        return None  # prevent schedule from holding return-value references
 
     def fetch_hot_prices(self):
         """Frequent fetch of stock prices for SENS-triggered hot-list tickers."""
@@ -308,6 +353,7 @@ class JAIBirdScheduler:
             logger.error(f"Hot-list price fetch failed: {e}")
         finally:
             self._force_gc()
+        return None
 
     def cleanup_old_prices(self):
         """Prune stock price history older than 90 days."""
@@ -317,6 +363,7 @@ class JAIBirdScheduler:
                 logger.info(f"Cleaned up {deleted} old price records")
         except Exception as e:
             logger.error(f"Price cleanup failed: {e}")
+        return None
     
     def check_scrape_trigger(self):
         """Check for a scrape trigger file written by the web container."""
@@ -332,13 +379,26 @@ class JAIBirdScheduler:
     def run_scheduler(self):
         """Run the scheduler in a loop."""
         self.running = True
+        self._loop_count = 0
         logger.info("JAIBird scheduler started")
-        
+
         while self.running:
             schedule.run_pending()
+
+            # schedule stores the last return value of each job -- discard them
+            for job in schedule.jobs:
+                job.last_run_result = None
+
             self.check_scrape_trigger()
-            time.sleep(30)  # Check every 30 seconds (trigger file + schedule)
-        
+            self._loop_count += 1
+
+            # Force full GC + ticker reload every ~30 min (60 iterations x 30s)
+            if self._loop_count % 60 == 0:
+                self._force_gc()
+                self.price_service._tickers = None
+
+            time.sleep(30)
+
         logger.info("JAIBird scheduler stopped")
     
     def stop(self):
