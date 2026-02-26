@@ -47,25 +47,24 @@ class CompanyDB:
             path = db_path
         self.db_path = Path(path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn: Optional[sqlite3.Connection] = None
         self._init_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        """Return the persistent connection, creating it if needed."""
-        if self._conn is None:
-            self._conn = sqlite3.connect(self.db_path, timeout=30)
-            self._conn.row_factory = sqlite3.Row
-            self._conn.execute("PRAGMA journal_mode=WAL")
-        return self._conn
+        """Return a connection, reconnecting if the previous one is stale.
+
+        Each call creates a short-lived connection so that WAL recovery
+        and checkpoint locks held by the scheduler container don't block
+        the web container permanently.
+        """
+        conn = sqlite3.connect(str(self.db_path), timeout=30)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=30000")
+        return conn
 
     def close(self) -> None:
-        """Explicitly close the persistent connection."""
-        if self._conn is not None:
-            try:
-                self._conn.close()
-            except Exception:
-                pass
-            self._conn = None
+        """No-op (connections are per-call now)."""
+        pass
 
     # ------------------------------------------------------------------
     # Schema

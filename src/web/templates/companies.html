@@ -74,16 +74,25 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 async function loadCompanies() {
+    const tbody = document.getElementById('companiesBody');
     try {
         const q = document.getElementById('companySearch').value.trim();
         const url = q ? `/api/companies?q=${encodeURIComponent(q)}` : '/api/companies';
         const resp = await fetch(url);
         const json = await resp.json();
-        if (json.status !== 'success') return;
+        if (json.status !== 'success') {
+            tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-4">
+                <i class="bi bi-exclamation-triangle"></i> Server error: ${esc(json.message || 'unknown')}</td></tr>`;
+            return;
+        }
         allCompanies = json.data;
         document.getElementById('companyCount').textContent = json.count;
         renderTable();
-    } catch (e) { console.error('Failed to load companies:', e); }
+    } catch (e) {
+        console.error('Failed to load companies:', e);
+        tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger py-4">
+            <i class="bi bi-exclamation-triangle"></i> Failed to load: ${esc(String(e))}</td></tr>`;
+    }
 }
 
 function sortTable(col) {

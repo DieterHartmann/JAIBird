@@ -602,36 +602,48 @@ def create_app():
         """Company intelligence database page."""
         try:
             count = company_db.get_company_count()
-            return render_template('companies.html', company_count=count)
         except Exception as e:
             logger.error(f"Error loading companies page: {e}")
-            return render_template('companies.html', company_count=0)
+            count = 0
+        return render_template('companies.html', company_count=count)
 
     @app.route('/api/companies')
     def api_companies():
-        """List all companies (lightweight)."""
-        try:
-            q = request.args.get('q', '').strip()
-            if q:
-                data = company_db.search_companies(q)
-            else:
-                data = company_db.get_all_profiles()
-            return jsonify({'status': 'success', 'data': data, 'count': len(data)})
-        except Exception as e:
-            logger.error(f"Companies API error: {e}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
+        """List all companies (lightweight), with retry for transient DB locks."""
+        import time as _time
+        last_err = None
+        for attempt in range(3):
+            try:
+                q = request.args.get('q', '').strip()
+                if q:
+                    data = company_db.search_companies(q)
+                else:
+                    data = company_db.get_all_profiles()
+                return jsonify({'status': 'success', 'data': data, 'count': len(data)})
+            except Exception as e:
+                last_err = e
+                logger.warning(f"Companies API attempt {attempt+1}/3 failed: {e}")
+                _time.sleep(1)
+        logger.error(f"Companies API error after retries: {last_err}")
+        return jsonify({'status': 'error', 'message': str(last_err)}), 500
 
     @app.route('/api/companies/<int:company_id>')
     def api_company_detail(company_id):
-        """Full detail for a single company."""
-        try:
-            detail = company_db.get_company_detail(company_id)
-            if not detail:
-                return jsonify({'status': 'error', 'message': 'Company not found'}), 404
-            return jsonify({'status': 'success', 'data': detail})
-        except Exception as e:
-            logger.error(f"Company detail API error: {e}")
-            return jsonify({'status': 'error', 'message': str(e)}), 500
+        """Full detail for a single company, with retry for transient DB locks."""
+        import time as _time
+        last_err = None
+        for attempt in range(3):
+            try:
+                detail = company_db.get_company_detail(company_id)
+                if not detail:
+                    return jsonify({'status': 'error', 'message': 'Company not found'}), 404
+                return jsonify({'status': 'success', 'data': detail})
+            except Exception as e:
+                last_err = e
+                logger.warning(f"Company detail API attempt {attempt+1}/3 failed: {e}")
+                _time.sleep(1)
+        logger.error(f"Company detail API error after retries: {last_err}")
+        return jsonify({'status': 'error', 'message': str(last_err)}), 500
 
     # Error handlers
     @app.errorhandler(404)
